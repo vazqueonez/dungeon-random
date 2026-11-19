@@ -10,31 +10,31 @@
 
 ## Engine & Language
 
-- **Engine**: [TO BE CONFIGURED — run /setup-engine]
-- **Language**: [TO BE CONFIGURED]
-- **Rendering**: [TO BE CONFIGURED]
-- **Physics**: [TO BE CONFIGURED]
+- **Engine**: Web (Vite 8.3.4, TypeScript 7.0.2, Phaser 4.2.1)
+- **Language**: TypeScript
+- **Rendering**: Phaser 4
+- **Physics**: none
 
 ## Input & Platform
 
 <!-- Written by /setup-engine. Read by /ux-design, /ux-review, /test-setup, /team-ui, and /dev-story -->
 <!-- to scope interaction specs, test helpers, and implementation to the correct input methods. -->
 
-- **Target Platforms**: [TO BE CONFIGURED — e.g., PC, Console, Mobile, Web]
-- **Input Methods**: [TO BE CONFIGURED — e.g., Keyboard/Mouse, Gamepad, Touch, Mixed]
-- **Primary Input**: [TO BE CONFIGURED — the dominant input for this game]
-- **Gamepad Support**: [TO BE CONFIGURED — Full / Partial / None]
-- **Touch Support**: [TO BE CONFIGURED — Full / Partial / None]
+- **Target Platforms**: Web
+- **Input Methods**: Keyboard/Mouse
+- **Primary Input**: Keyboard/Mouse
+- **Gamepad Support**: Partial
+- **Touch Support**: Partial
 - **Platform Notes**: [TO BE CONFIGURED — any platform-specific UX constraints]
 
 ## Naming Conventions
 
-- **Classes**: [TO BE CONFIGURED]
-- **Variables**: [TO BE CONFIGURED]
-- **Signals/Events**: [TO BE CONFIGURED]
-- **Files**: [TO BE CONFIGURED]
+- **Classes**: PascalCase (`GameHook`)
+- **Variables**: camelCase (`newState()`)
+- **Signals/Events**: `on<Event>` handlers
+- **Files**: kebab-case (`rules.ts`)
 - **Scenes/Prefabs**: [TO BE CONFIGURED]
-- **Constants**: [TO BE CONFIGURED]
+- **Constants**: SCREAMING_SNAKE (`STEP`)
 
 ## Performance Budgets
 
@@ -70,7 +70,7 @@
 <!-- Read by /code-review, /architecture-decision, /architecture-review, and team skills -->
 <!-- to know which specialist to spawn for engine-specific validation. -->
 
-- **Primary**: [TO BE CONFIGURED — run /setup-engine]
+- **Primary**: none — Web has no engine specialist agent; engine work goes to `lead-programmer` against `docs/engine-reference/web/`
 - **Language/Code Specialist**: [TO BE CONFIGURED]
 - **Shader Specialist**: [TO BE CONFIGURED]
 - **UI Specialist**: [TO BE CONFIGURED]
