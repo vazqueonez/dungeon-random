@@ -96,8 +96,10 @@ window.CONFIG = {
   patrol_move: { value: 2, min: 0, max: 5, step: 1 },          // tiles per turn while patrolling
   extra_enemies_from: { value: 3, min: 1, max: 5, step: 1 },   // heroes needed for the extra enemies (5 = never)
 
-  // ---- The dungeon: 5x5 rooms of 12x12, built from the seed ----
+  // ---- The dungeon: a table of 5x5 room cards of 12x12, dealt from the seed ----
   extra_door_chance: { value: 30, min: 0, max: 100, step: 5 }, // % for each neighbour pair not already joined by the maze
+  card_gap: { value: 40, min: 0, max: 160, step: 4 },          // world px of table between cards (a cell is 64)
+  flip_time: { value: 0.6, min: 0.1, max: 2, step: 0.05 },     // seconds a card takes to turn face up
   room_enemies_min: { value: 1, min: 0, max: 5, step: 1 },     // enemies in an ordinary room
   room_enemies_max: { value: 2, min: 0, max: 6, step: 1 },
   extra_enemy_chance: { value: 35, min: 0, max: 100, step: 5 }, // % a room gets one more, with extra_enemies_from heroes

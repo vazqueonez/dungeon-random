@@ -154,36 +154,48 @@ function sfx(name) {
     case 'alert': tone(440, 0.08, 'square', 0.12); tone(330, 0.1, 'square', 0.12, 0.08); break;
     case 'down': tone(330, 0.25, 'triangle', 0.2); tone(220, 0.35, 'triangle', 0.2, 0.2); break;
     case 'card': tone(400, 0.08, 'triangle', 0.14); tone(600, 0.1, 'triangle', 0.12, 0.06); break;
+    case 'flip': tone(900, 0.05, 'sine', 0.08, 0.05, 500); tone(240, 0.12, 'triangle', 0.14, 0.18); break;
     case 'win': [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.3, 'triangle', 0.18, i * 0.14)); break;
     case 'lose': [330, 262, 196].forEach((f, i) => tone(f, 0.4, 'triangle', 0.18, i * 0.2)); break;
   }
 }
 
 // ---- The game: the dungeon ---------------------------------------------------------------
-// 5x5 rooms of 12x12 cells, seen from above. rooms.js holds the room templates and art.js the
-// painted images; the seed picks each room's template, which neighbours connect, and what is
-// inside.
+// A table of 5x5 room cards, each a room of 12x12 cells seen from above, with a gap of table
+// between cards. rooms.js holds the cards and art.js the painted images. The seed shuffles the
+// main deck (24 cards around the centre) and the boss deck (the centre card), picks which
+// neighbouring exits get a door, and what is inside. Cards lie face down until a door opens onto
+// them; the heroes' chosen corners start face up.
+// The rules work on one 60x60 grid of cells; the gap exists only where cells are drawn
+// (cellX/cellY, wpos), so a door's two halves are neighbouring cells across the gap.
 const ROOM = 12, RW = 5, N = ROOM * RW, TS = 64; // TS: world px per cell
 const T_WALL = 0, T_FLOOR = 1, T_DOOR = 2, T_OPEN = 3;
 const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-const BOSS_ROOM = 12; // the centre room
-// Players take the corner rooms in this order: opposite corners first, so two heroes converge.
+const BOSS_ROOM = 12; // the centre card
+// The corner cards, in the order the setup offers them: opposite corners first.
 const CORNER_ROOMS = [0, 24, 4, 20];
-const DOORWAY = [5, 6]; // the cells of each side that open when two rooms connect
+const CORNER_NAMES = { 0: 'noroeste', 4: 'noreste', 20: 'suroeste', 24: 'sureste' };
+const DOORWAY = [5, 6]; // the cells of each side that are the card's exit
+const SIDES = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
 const TEMPLATES = window.ROOMS || {};
 const ARTS = window.ART || {};
 const TEMPLATE_IDS = Object.keys(TEMPLATES);
 const tplOf = use => TEMPLATE_IDS.filter(k => TEMPLATES[k].use === use);
-function checkTemplates() { // the rules rooms.js states; a broken template is named in the console
+const exitCell = (x, y) => (DOORWAY.includes(x) && (y === 0 || y === ROOM - 1)) || (DOORWAY.includes(y) && (x === 0 || x === ROOM - 1));
+function checkTemplates() { // the rules rooms.js states; a broken card is named in the console
   for (const id of TEMPLATE_IDS) {
     const m = TEMPLATES[id].map, bad = [];
     if (!Array.isArray(m) || m.length !== ROOM || m.some(r => r.length !== ROOM)) bad.push('no es de 12x12');
     else {
-      for (let i = 0; i < ROOM; i++) for (const [x, y] of [[i, 0], [i, ROOM - 1], [0, i], [ROOM - 1, i]]) if (!'#t'.includes(m[y][x])) bad.push(`anillo abierto en ${x},${y}`);
+      for (let i = 0; i < ROOM; i++) for (const [x, y] of [[i, 0], [i, ROOM - 1], [0, i], [ROOM - 1, i]]) {
+        if (exitCell(x, y)) { if (m[y][x] !== '.') bad.push(`salida tapada en ${x},${y}`); }
+        else if (!'#t'.includes(m[y][x])) bad.push(`anillo abierto en ${x},${y}`);
+      }
       for (const d of DOORWAY) for (const [x, y] of [[d, 1], [d, ROOM - 2], [1, d], [ROOM - 2, d]]) if (m[y][x] !== '.') bad.push(`entrada tapada en ${x},${y}`);
+      if (TEMPLATES[id].use === 'boss' && m[6][6] !== '.') bad.push('el centro (6,6) no es suelo');
       const open = (x, y) => m[y] && (m[y][x] === '.');
       let floor = 0; for (const r of m) for (const ch of r) if (ch === '.') floor++;
-      const seen = new Set([`${DOORWAY[0]},1`]), q = [[DOORWAY[0], 1]];
+      const seen = new Set([`${DOORWAY[0]},0`]), q = [[DOORWAY[0], 0]];
       while (q.length) {
         const [x, y] = q.pop();
         for (const [dx, dy] of DIR4) { const k = `${x + dx},${y + dy}`; if (!seen.has(k) && open(x + dx, y + dy)) { seen.add(k); q.push([x + dx, y + dy]); } }
@@ -192,6 +204,8 @@ function checkTemplates() { // the rules rooms.js states; a broken template is n
     }
     if (bad.length) console.warn(`rooms.js: ${id}: ${bad.slice(0, 3).join(', ')}`);
   }
+  if (tplOf('room').length < RW * RW - 1) console.warn(`rooms.js: el mazo de salas tiene ${tplOf('room').length} cartas; hacen falta ${RW * RW - 1}`);
+  if (!tplOf('boss').length) console.warn('rooms.js: el mazo del jefe está vacío');
 }
 checkTemplates();
 
@@ -226,13 +240,13 @@ function hstat(h, s) { return tune[`${h.cls}_${s}`]; }
 function estat(e, s) { return tune[`${e.kind}_${s}`]; }
 
 // ---- State ------------------------------------------------------------------------------
-const setup = { count: 2, classes: ['warrior', 'mage', 'healer', 'archer'], row: 0 };
+const setup = { count: 2, classes: ['warrior', 'mage', 'healer', 'archer'], corners: CORNER_ROOMS.slice(), row: 0 };
 const cam = { x: 0, y: 0, zoom: 0.8, tx: 0, ty: 0, follow: true };
 let scene, state, ui = [];
 
 function reset() {
   seed = Number(params.get('seed')) || CONFIG.seed;
-  const n = setup.count, players = CORNER_ROOMS.slice(0, n), rooms = RW * RW;
+  const n = setup.count, players = setup.corners.slice(0, n), rooms = RW * RW;
   state = {
     t: 0, score: 0, gained: '', round: 1, phase: 'hero', active: 0, mode: null,
     tiles: new Array(N * N).fill(T_WALL), objs: new Array(N * N).fill(null), doorAt: new Int16Array(N * N).fill(-1),
@@ -243,9 +257,9 @@ function reset() {
     banner: null, shake: 0, acting: null, players: n,
   };
   buildDungeon(players);
-  for (let i = 0; i < n; i++) { // each hero in the outer corner of their room
-    const r = CORNER_ROOMS[i], R = state.rooms[r], cls = setup.classes[i], hp = tune[cls + '_hp'];
-    const x = R.rc * ROOM + (R.rc === 0 ? 2 : ROOM - 3), y = R.rr * ROOM + (R.rr === 0 ? 2 : ROOM - 3);
+  for (let i = 0; i < n; i++) { // each hero on the free floor nearest the table's corner, in their card
+    const r = players[i], cls = setup.classes[i], hp = tune[cls + '_hp'];
+    const [x, y] = cornerCell(r);
     state.heroes.push({ id: 'h' + i, hero: true, player: i, cls, kind: cls, x, y, hp, maxHp: hp,
       ap: 0, cds: [0, 0], shield: 0, downed: false, tonics: 0, miss: 0, flash: 0, anim: null, face: 1,
       stats: { dmg: 0, kills: 0, help: 0 } });
@@ -257,16 +271,20 @@ function reset() {
   startHeroTurn(0, true);
   log('Objetivo: derrota a El Carcelero en la sala central.');
 }
+function shuffled(list) { const a = list.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function buildDungeon(players) {
-  const ordinary = tplOf('room'), start = tplOf('start')[0] || ordinary[0], bossT = tplOf('boss')[0] || ordinary[0];
+  // Deal the table: the boss deck's top card in the centre, the main deck's in the other 24 spots.
+  const deck = shuffled(tplOf('room')), bossDeck = shuffled(tplOf('boss'));
+  state.deck = { rooms: deck.length, bosses: bossDeck.length };
   for (let r = 0; r < RW * RW; r++) {
-    const tpl = r === BOSS_ROOM ? bossT : players.includes(r) ? start : ordinary[Math.floor(rng() * ordinary.length)];
-    const R = { tpl, rc: r % RW, rr: (r / RW) | 0, variant: Math.floor(rng() * 997) };
+    const tpl = r === BOSS_ROOM ? (bossDeck[0] || deck[0]) : (deck.shift() || TEMPLATE_IDS[r % TEMPLATE_IDS.length]);
+    const R = { tpl, rc: r % RW, rr: (r / RW) | 0, variant: Math.floor(rng() * 997), exits: { n: -1, s: -1, w: -1, e: -1 } };
     state.rooms.push(R);
     const m = TEMPLATES[tpl].map;
     for (let ly = 0; ly < ROOM; ly++) for (let lx = 0; lx < ROOM; lx++) {
       const x = R.rc * ROOM + lx, y = R.rr * ROOM + ly, ch = m[ly][lx], i = idx(x, y);
-      state.tiles[i] = ch === '.' || ch === 'o' ? T_FLOOR : T_WALL;
+      // an exit is wall (covered by rubble) until a door is put in it
+      state.tiles[i] = (ch === '.' || ch === 'o') && !exitCell(lx, ly) ? T_FLOOR : T_WALL;
       if (ch === 'o') state.objs[i] = 'pillar';
       if (ch === 't') { // its light comes from the side that faces the floor
         const [dx, dy] = torchFacing(m, lx, ly);
@@ -293,7 +311,7 @@ function torchFacing(m, lx, ly) {
   for (const [dx, dy] of DIR4) { const c = m[ly + dy] && m[ly + dy][lx + dx]; if (c === '.' || c === 'o') return [dx, dy]; }
   return [0, 0];
 }
-function addDoor(a, b) { // a 2x2 doorway across both rooms' walls, cells 5-6 of the shared side
+function addDoor(a, b) { // a door in both cards' facing exits: 2x2 cells, one half on each card
   const A = state.rooms[a], side = b === a + 1;
   const d = { rooms: [a, b], open: false, orient: side ? 'v' : 'h', tiles: [],
     x0: side ? A.rc * ROOM + ROOM - 1 : A.rc * ROOM + DOORWAY[0],
@@ -302,7 +320,18 @@ function addDoor(a, b) { // a 2x2 doorway across both rooms' walls, cells 5-6 of
     const x = d.x0 + dx, y = d.y0 + dy, i = idx(x, y);
     d.tiles.push({ x, y }); state.tiles[i] = T_DOOR; state.doorAt[i] = state.doors.length;
   }
+  if (side) { A.exits.e = state.doors.length; state.rooms[b].exits.w = state.doors.length; }
+  else { A.exits.s = state.doors.length; state.rooms[b].exits.n = state.doors.length; }
   state.doors.push(d);
+}
+function cornerCell(r) { // the free floor cell of a corner card nearest the table's corner
+  const R = state.rooms[r], cx = R.rc === 0 ? 0 : ROOM - 1, cy = R.rr === 0 ? 0 : ROOM - 1;
+  let best = null, bd = 1e9;
+  for (let ly = 1; ly < ROOM - 1; ly++) for (let lx = 1; lx < ROOM - 1; lx++) {
+    const x = R.rc * ROOM + lx, y = R.rr * ROOM + ly, i = idx(x, y), d = Math.hypot(lx - cx, ly - cy);
+    if (state.tiles[i] === T_FLOOR && !state.objs[i] && !unitAt(x, y) && d < bd && Math.min(Math.abs(lx - cx), Math.abs(ly - cy)) >= 2) { bd = d; best = [x, y]; }
+  }
+  return best || [R.rc * ROOM + 5, R.rr * ROOM + 5];
 }
 function freeCell(r) { // a random empty floor cell of a room, off the cells inside its doorways
   const R = state.rooms[r], cells = [];
@@ -435,8 +464,9 @@ function revealRoom(r, from) {
   state.revealed[r] = true; state.revealT[r] = state.t; state.revealFrom[r] = from;
   let woke = 0;
   for (const e of state.enemies) if (e.alive && e.room === r && e.state === 'dormant') { e.state = 'patrol'; woke++; }
-  log(r === BOSS_ROOM ? '¡La sala del Carcelero! No saldrá de ella.' :
-    `Se abre ${TEMPLATES[state.rooms[r].tpl].name}${woke ? `: ${woke} enemigo${woke > 1 ? 's' : ''}` : ''}.`);
+  log(r === BOSS_ROOM ? `¡${cap(TEMPLATES[state.rooms[r].tpl].name)}! El Carcelero no saldrá de ella.` :
+    `Se gira la carta: ${TEMPLATES[state.rooms[r].tpl].name}${woke ? `, ${woke} enemigo${woke > 1 ? 's' : ''}` : ''}.`);
+  sfx('flip');
   events.push({ type: 'reveal', room: r });
 }
 const doorSeen = d => d.rooms.some(r => state.revealed[r]);
@@ -446,13 +476,16 @@ function tileSeen(x, y) {
   const d = state.doorAt[idx(x, y)];
   return d >= 0 && doorSeen(state.doors[d]);
 }
-function fogAlpha(x, y) {
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+function flipOf(r) { // 0 face down … 1 face up; a card turns over in flip_time seconds once revealed
+  if (!state.revealed[r]) return 0;
+  return clamp((state.t - state.revealT[r]) / Math.max(0.01, tune.flip_time), 0, 1);
+}
+function fogAlpha(x, y) { // 1 hidden, 0 seen: a card's cells show once its face is up
   const r = roomOf(x, y);
   if (r < 0) return 1;
   if (!state.revealed[r]) return tileSeen(x, y) ? 0 : 1;
-  const f = state.revealFrom[r];
-  const delay = f ? Math.hypot(x - f.x, y - f.y) * 0.045 : 0;
-  return 1 - clamp((state.t - state.revealT[r] - delay) / 0.4, 0, 1);
+  return 1 - clamp((flipOf(r) - 0.5) * 2, 0, 1);
 }
 
 // ---- Turns ------------------------------------------------------------------------------
@@ -820,7 +853,25 @@ function markSlam() {
 
 // ---- Camera: top-down, a cell is TS world px ---------------------------------------------
 const FEET = TS * 0.3; // a code-drawn figure stands this far below its cell's centre
-function wpos(x, y) { return { x: (x + 0.5) * TS, y: (y + 0.5) * TS }; }
+const CARD = ROOM * TS;                                  // a card's side in world px
+const pitch = () => CARD + tune.card_gap;                // card to card, gap included
+const boardSize = () => RW * CARD + (RW - 1) * tune.card_gap;
+/** The world x (or y) of a cell's left (or top) edge: cells, plus a gap for each card before it. */
+function cellX(x) { return x * TS + Math.floor(x / ROOM) * tune.card_gap; }
+const cellY = cellX;
+/** A card's rectangle in world px. */
+function cardRect(r) { const R = state.rooms[r]; return { x: R.rc * pitch(), y: R.rr * pitch(), w: CARD, h: CARD }; }
+/** The world px at a cell's centre; between two cells (a figure walking), part way, crossing a gap. */
+function wpos(x, y) {
+  const at = v => { const a = Math.floor(v), k = v - a, c0 = cellX(a) + TS / 2; return k ? c0 + (cellX(a + 1) + TS / 2 - c0) * k : c0; };
+  return { x: at(x), y: at(y) };
+}
+/** The cell under a world px, or -1 in a gap between cards or off the table. */
+function worldCell(w) {
+  const k = Math.floor(w / pitch()), o = w - k * pitch();
+  if (k < 0 || k >= RW || o >= CARD) return -1;
+  return k * ROOM + Math.floor(o / TS);
+}
 function camTo(x, y, snap) {
   const w = wpos(x, y); cam.tx = w.x; cam.ty = w.y; cam.follow = true;
   if (snap) { cam.x = cam.tx; cam.y = cam.ty; }
@@ -835,12 +886,15 @@ function updateCamera(dt) {
   if (pressed('KeyC') && state.phase === 'hero') { const h = activeHero(); camTo(h.x, h.y); }
   if (cam.follow) { const f = Math.min(1, dt * 6); cam.x += (cam.tx - cam.x) * f; cam.y += (cam.ty - cam.y) * f; }
   // the board's edge stops a little inside the screen's, so a corner room clears the HUD
-  const edge = (half) => Math.min(Math.max(0, half - 240 / cam.zoom), N * TS / 2);
-  cam.x = clamp(cam.x, edge(W / 2 / cam.zoom), N * TS - edge(W / 2 / cam.zoom));
-  cam.y = clamp(cam.y, edge(H / 2 / cam.zoom), N * TS - edge(H / 2 / cam.zoom));
+  const B = boardSize(), edge = (half) => Math.min(Math.max(0, half - 240 / cam.zoom), B / 2);
+  cam.x = clamp(cam.x, edge(W / 2 / cam.zoom), B - edge(W / 2 / cam.zoom));
+  cam.y = clamp(cam.y, edge(H / 2 / cam.zoom), B - edge(H / 2 / cam.zoom));
 }
 function toWorld(px, py) { return { x: (px - W / 2) / cam.zoom + cam.x, y: (py - H / 2) / cam.zoom + cam.y }; }
-function screenToTile(px, py) { const w = toWorld(px, py); return { x: Math.floor(w.x / TS), y: Math.floor(w.y / TS) }; }
+function screenToTile(px, py) {
+  const w = toWorld(px, py), x = worldCell(w.x), y = worldCell(w.y);
+  return x < 0 || y < 0 ? { x: -1, y: -1 } : { x, y };
+}
 function toScreen(wx, wy) { return { x: (wx - cam.x) * cam.zoom + W / 2, y: (wy - cam.y) * cam.zoom + H / 2 }; }
 function dispPos(u) { // where a figure is drawn, part way along its move
   if (!u.anim) return { x: u.x, y: u.y };
@@ -1072,7 +1126,7 @@ function loadArt() {
       images[v] = null; const im = new Image(); im.onload = () => { images[v] = im; }; im.src = v;
     }
   };
-  for (const g of ['rooms', 'doors', 'props', 'units']) for (const k in (ARTS[g] || {})) add(ARTS[g][k]);
+  for (const g of ['rooms', 'cards', 'doors', 'props', 'units']) for (const k in (ARTS[g] || {})) add(ARTS[g][k]);
 }
 function artImage(group, key, variant = 0) {
   const v = ARTS[group] && ARTS[group][key];
@@ -1246,27 +1300,85 @@ function paintedRoom(id) { // a template painted by code: the stand-in for its p
   }
   return (painted[key] = c);
 }
-function paintedDoor(open) { // 2x2 cells: a doorway in a north or south wall, passage top to bottom
+// The 2x1 pieces that sit in a card's exit, painted for the north side (top edge = the card's
+// edge, bottom = toward the room); the game turns them for the other sides.
+function paintedDoor(open) { // half a door: the half in this card's exit
   const key = 'door:' + open;
   if (painted[key]) return painted[key];
-  const S = 2 * TS, c = canvasOf(S, S), g = c.getContext('2d');
-  g.fillStyle = '#231e1a'; g.fillRect(0, 0, S, S);
-  for (let i = 0; i < 4; i++) paintStone(g, 20 + (i % 2) * 46, 2 + (i >> 1) * 64, 44, 60, 102 + i * 5, i * 7 + 3, 5, 5);
-  paintStone(g, 2, 2, 17, S - 4, 150, 1, 2, 5); paintStone(g, S - 19, 2, 17, S - 4, 152, 3, 4, 5);
-  if (open) {
-    g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(19, S / 2 - 3, S - 38, 6);
-    rrp(g, 21, 6, 11, S - 12, 3); g.fillStyle = '#6b4526'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#1e120a'; g.stroke();
-    g.fillStyle = '#3c3a40'; g.fillRect(21, 24, 11, 5); g.fillRect(21, S - 30, 11, 5);
-  } else {
-    const y = S / 2 - 20, h = 40;
-    g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(19, y + 4, S - 38, h);
-    rrp(g, 17, y, S - 34, h, 4); g.fillStyle = '#7a4c2a'; g.fill(); g.lineWidth = 2.5; g.strokeStyle = '#1e120a'; g.stroke();
+  const Wd = 2 * TS, Hd = TS, c = canvasOf(Wd, Hd), g = c.getContext('2d');
+  g.fillStyle = '#231e1a'; g.fillRect(0, 0, Wd, Hd);
+  for (let i = 0; i < 4; i++) paintStone(g, 2 + (i % 2) * 63, 2 + (i >> 1) * 31, 61, 29, 98 + i * 6, i * 7 + 3, 5, 5);
+  if (open) { // the leaf swung back against the jamb
+    g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(6, 6, 16, Hd - 8);
+    rrp(g, 3, 2, 13, Hd - 6, 3); g.fillStyle = '#6b4526'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#1e120a'; g.stroke();
+    g.fillStyle = '#3c3a40'; g.fillRect(3, 12, 13, 4); g.fillRect(3, Hd - 20, 13, 4);
+  } else { // planks across the exit, near the card's edge
+    const y = 6, h = 30;
+    g.fillStyle = 'rgba(0,0,0,0.4)'; g.fillRect(2, y + 6, Wd - 4, h);
+    rrp(g, 0, y, Wd, h, 3); g.fillStyle = '#7a4c2a'; g.fill(); g.lineWidth = 2.5; g.strokeStyle = '#1e120a'; g.stroke();
     g.strokeStyle = 'rgba(30,16,8,0.7)'; g.lineWidth = 1.5;
-    for (let k = 1; k < 6; k++) { const px = 17 + k * (S - 34) / 6; g.beginPath(); g.moveTo(px, y + 3); g.lineTo(px, y + h - 3); g.stroke(); }
-    g.fillStyle = '#3c3a40'; g.fillRect(17, y + 7, S - 34, 5); g.fillRect(17, y + h - 12, S - 34, 5);
-    g.beginPath(); g.arc(S - 32, S / 2, 5, 0, Math.PI * 2); g.lineWidth = 2.5; g.strokeStyle = '#d8b04a'; g.stroke();
+    for (let k = 1; k < 6; k++) { const px = k * Wd / 6; g.beginPath(); g.moveTo(px, y + 3); g.lineTo(px, y + h - 3); g.stroke(); }
+    g.fillStyle = '#3c3a40'; g.fillRect(0, y + 5, Wd, 4); g.fillRect(0, y + h - 9, Wd, 4);
+    g.beginPath(); g.arc(Wd - 22, y + h / 2, 4.5, 0, Math.PI * 2); g.lineWidth = 2.5; g.strokeStyle = '#d8b04a'; g.stroke();
   }
   return (painted[key] = c);
+}
+function paintedRubble() { // fallen stone filling an exit that leads nowhere
+  if (painted.rubble) return painted.rubble;
+  const Wd = 2 * TS, Hd = TS, c = canvasOf(Wd, Hd), g = c.getContext('2d');
+  g.fillStyle = '#231e1a'; g.fillRect(0, 0, Wd, Hd);
+  g.fillStyle = 'rgba(70,60,48,0.8)'; g.beginPath(); g.ellipse(Wd / 2, Hd / 2 + 6, Wd / 2 + 4, Hd / 2 + 2, 0, 0, Math.PI * 2); g.fill();
+  for (let k = 0; k < 11; k++) {
+    const w = 22 + hash(k, 3) * 26, h = 16 + hash(5, k) * 18;
+    paintStone(g, hash(k, 11) * (Wd - w), hash(17, k) * (Hd - h) * 0.9, w, h, 112 + hash(k, k + 2) * 46, k + 9, k * 3, 5);
+  }
+  return (painted.rubble = c);
+}
+function paintedBack(boss) { // the back of a card, face down on the table
+  const key = 'back:' + boss;
+  if (painted[key]) return painted[key];
+  const S = CARD, c = canvasOf(S, S), g = c.getContext('2d'), m = 34;
+  g.fillStyle = boss ? '#2a1214' : '#1d1a22'; g.fillRect(0, 0, S, S);
+  for (let k = 0; k < 900; k++) { // a woven texture
+    const x = hash(k, 7) * S, y = hash(13, k) * S;
+    g.fillStyle = `rgba(255,240,220,${0.015 + hash(k, k) * 0.03})`; g.fillRect(x, y, 2 + hash(k, 3) * 10, 1.5);
+  }
+  const gold = boss ? '#b8483a' : '#a8884a';
+  g.strokeStyle = gold; g.lineWidth = 6; rrp(g, m, m, S - 2 * m, S - 2 * m, 26); g.stroke();
+  g.lineWidth = 2; rrp(g, m + 16, m + 16, S - 2 * m - 32, S - 2 * m - 32, 18); g.stroke();
+  for (const [x, y] of [[m + 16, m + 16], [S - m - 16, m + 16], [m + 16, S - m - 16], [S - m - 16, S - m - 16]]) {
+    g.beginPath(); g.moveTo(x, y - 14); g.lineTo(x + 14, y); g.lineTo(x, y + 14); g.lineTo(x - 14, y); g.closePath(); g.fillStyle = gold; g.fill();
+  }
+  const cx = S / 2, cy = S / 2;
+  const gl = g.createRadialGradient(cx, cy, 10, cx, cy, 230); gl.addColorStop(0, boss ? 'rgba(220,60,40,0.35)' : 'rgba(255,170,70,0.3)'); gl.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gl; g.fillRect(0, 0, S, S);
+  g.lineWidth = 5; g.strokeStyle = gold;
+  if (boss) { // a skull behind bars
+    g.beginPath(); g.arc(cx, cy - 20, 78, Math.PI, 0); g.lineTo(cx + 60, cy + 60); g.lineTo(cx - 60, cy + 60); g.closePath();
+    g.fillStyle = '#d8ccb4'; g.fill(); g.stroke();
+    g.fillStyle = '#2a1214'; for (const s of [-1, 1]) { g.beginPath(); g.ellipse(cx + s * 32, cy - 10, 20, 24, 0, 0, Math.PI * 2); g.fill(); }
+    g.beginPath(); g.moveTo(cx, cy + 14); g.lineTo(cx - 10, cy + 34); g.lineTo(cx + 10, cy + 34); g.closePath(); g.fill();
+    g.strokeStyle = '#4a3a3a'; g.lineWidth = 12; for (let k = -2; k <= 2; k++) { g.beginPath(); g.moveTo(cx + k * 52, cy - 150); g.lineTo(cx + k * 52, cy + 150); g.stroke(); }
+  } else { // a d20 and a torch
+    const r = 120, pts = [...Array(6)].map((_, i) => [cx + Math.cos(i * Math.PI / 3 - Math.PI / 2) * r, cy + Math.sin(i * Math.PI / 3 - Math.PI / 2) * r]);
+    g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fillStyle = 'rgba(168,136,74,0.15)'; g.fill(); g.stroke();
+    const tri = [pts[0], pts[2], pts[4]]; g.beginPath(); tri.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.lineWidth = 3; g.stroke();
+    for (const [x, y] of tri) for (const [x2, y2] of pts) if (Math.hypot(x - x2, y - y2) < r * 1.1 && Math.hypot(x - x2, y - y2) > 1) { g.beginPath(); g.moveTo(x, y); g.lineTo(x2, y2); g.stroke(); }
+    g.font = `bold 64px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#e8d29a'; g.fillText('20', cx, cy + 14);
+  }
+  return (painted[key] = c);
+}
+let tablePattern = null;
+function tableFill() { // dark wood under the cards
+  if (tablePattern) return tablePattern;
+  const S = 512, c = canvasOf(S, S), g = c.getContext('2d');
+  g.fillStyle = '#17110d'; g.fillRect(0, 0, S, S);
+  for (let k = 0; k < 140; k++) {
+    const y = hash(k, 1) * S, a = 0.03 + hash(2, k) * 0.07;
+    g.strokeStyle = hash(k, 9) < 0.5 ? `rgba(90,60,36,${a})` : `rgba(0,0,0,${a * 1.6})`; g.lineWidth = 1 + hash(k, 4) * 3;
+    g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= S; x += 32) g.lineTo(x, y + Math.sin(x * 0.02 + k) * 4 * hash(k, 5)); g.stroke();
+  }
+  return (tablePattern = ctx.createPattern(c, 'repeat'));
 }
 function paintedChest(open) { // 1 cell, seen from above
   const key = 'chest:' + open;
@@ -1315,19 +1427,38 @@ function computeLight() { // one pixel per cell: darkness and fog, drawn smoothe
   }
   lctx.putImageData(lightData, 0, 0);
 }
-function viewTiles() {
-  const hw = W / 2 / cam.zoom, hh = H / 2 / cam.zoom;
-  return { x0: Math.max(0, Math.floor((cam.x - hw) / TS) - 1), x1: Math.min(N - 1, Math.ceil((cam.x + hw) / TS) + 1),
-    y0: Math.max(0, Math.floor((cam.y - hh) / TS) - 1), y1: Math.min(N - 1, Math.ceil((cam.y + hh) / TS) + 1) };
+function viewTiles() { // the cells on screen, a cell of margin around
+  const hw = W / 2 / cam.zoom, hh = H / 2 / cam.zoom, p = pitch();
+  const lo = w => clamp(Math.floor(w / p) * ROOM + Math.floor(clamp(w - Math.floor(w / p) * p, 0, CARD - 1) / TS) - 1, 0, N - 1);
+  const hi = w => clamp(Math.floor(w / p) * ROOM + Math.floor(clamp(w - Math.floor(w / p) * p, 0, CARD - 1) / TS) + 1, 0, N - 1);
+  return { x0: lo(cam.x - hw), x1: hi(cam.x + hw), y0: lo(cam.y - hh), y1: hi(cam.y + hh) };
 }
-function drawDoor(d) {
-  const img = artImage('doors', d.open ? 'open' : 'closed') || paintedDoor(d.open);
-  ctx.save(); ctx.translate((d.x0 + 1) * TS, (d.y0 + 1) * TS);
-  if (d.orient === 'v') ctx.rotate(Math.PI / 2);
-  ctx.drawImage(img, -TS, -TS, 2 * TS, 2 * TS); ctx.restore();
+const SIDE_TURN = { n: 0, e: Math.PI / 2, s: Math.PI, w: -Math.PI / 2 };
+function drawExitPiece(r, side, img) { // a 2x1 piece in one of a card's exits, turned to face out
+  const R = state.rooms[r], bx = R.rc * ROOM, by = R.rr * ROOM;
+  const c = side === 'n' ? wpos(bx + 5.5, by) : side === 's' ? wpos(bx + 5.5, by + ROOM - 1) :
+    side === 'w' ? wpos(bx, by + 5.5) : wpos(bx + ROOM - 1, by + 5.5);
+  ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(SIDE_TURN[side]);
+  ctx.drawImage(img, -TS, -TS / 2, 2 * TS, TS); ctx.restore();
+}
+function drawBridge(d) { // the threshold across the gap between a door's two halves
+  const g = tune.card_gap; if (g <= 0) return;
+  const x = d.orient === 'v' ? cellX(d.x0) + TS : cellX(d.x0), y = d.orient === 'v' ? cellY(d.y0) : cellY(d.y0) + TS;
+  const w = d.orient === 'v' ? g : 2 * TS, h = d.orient === 'v' ? 2 * TS : g;
+  ctx.fillStyle = d.open ? '#3a3129' : '#2a231e'; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(10,6,4,0.8)'; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(160,140,110,0.25)'; ctx.lineWidth = 2;
+  for (let k = 1; k < 3; k++) { ctx.beginPath(); if (d.orient === 'v') { ctx.moveTo(x, y + k * TS * 2 / 3); ctx.lineTo(x + w, y + k * TS * 2 / 3); } else { ctx.moveTo(x + k * TS * 2 / 3, y); ctx.lineTo(x + k * TS * 2 / 3, y + h); } ctx.stroke(); }
 }
 function drawChest(x, y, open) {
-  ctx.drawImage(artImage('props', open ? 'chest_open' : 'chest') || paintedChest(open), x * TS, y * TS, TS, TS);
+  ctx.drawImage(artImage('props', open ? 'chest_open' : 'chest') || paintedChest(open), cellX(x), cellY(y), TS, TS);
+}
+/** Draw inside card r turned by its flip: the face once past halfway, squeezed sideways while turning. */
+function withCard(r, fn) {
+  const f = state.revealed[r] ? flipOf(r) : 0, c = cardRect(r);
+  const sx = Math.max(0.02, Math.abs(Math.cos(f * Math.PI)));
+  ctx.save(); ctx.translate(c.x + CARD / 2, c.y + CARD / 2); ctx.scale(sx, 1 + 0.06 * Math.sin(f * Math.PI)); ctx.translate(-c.x - CARD / 2, -c.y - CARD / 2);
+  fn(f >= 0.5, c); ctx.restore();
 }
 function drawUnit(u) {
   const d = dispPos(u), c = wpos(d.x, d.y), fx = c.x, fy = c.y + FEET, big = u.kind === 'boss';
@@ -1374,21 +1505,55 @@ function drawBoard() {
   ctx.translate(W / 2 + Math.sin(state.t * 60) * sh, H / 2 + Math.cos(state.t * 47) * sh);
   ctx.scale(cam.zoom, cam.zoom); ctx.translate(-cam.x, -cam.y);
   ctx.imageSmoothingEnabled = true;
-  for (let r = 0; r < RW * RW; r++) { // the rooms: painted image, or its code-painted stand-in
-    if (!state.revealed[r]) continue;
-    const R = state.rooms[r], x = R.rc * ROOM, y = R.rr * ROOM;
-    if (x > v.x1 || x + ROOM - 1 < v.x0 || y > v.y1 || y + ROOM - 1 < v.y0) continue;
-    ctx.drawImage(artImage('rooms', R.tpl, R.variant) || paintedRoom(R.tpl), x * TS, y * TS, ROOM * TS, ROOM * TS);
+  const B = boardSize(), M = CARD; // the table, with a margin of wood around the cards
+  ctx.fillStyle = tableFill(); ctx.fillRect(-M, -M, B + 2 * M, B + 2 * M);
+  const onScreen = r => { const R = state.rooms[r], x = R.rc * ROOM, y = R.rr * ROOM; return !(x > v.x1 || x + ROOM - 1 < v.x0 || y > v.y1 || y + ROOM - 1 < v.y0); };
+  const radius = TS * 0.35;
+  for (let r = 0; r < RW * RW; r++) { // the cards: shadow, then face or back
+    if (!onScreen(r)) continue;
+    const c = cardRect(r);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrp(ctx, c.x + 10, c.y + 16, CARD, CARD, radius + 4); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; rrp(ctx, c.x + 4, c.y + 7, CARD, CARD, radius); ctx.fill();
   }
-  for (const d of state.doors) if (doorSeen(d)) drawDoor(d);
-  for (let y = v.y0; y <= v.y1; y++) for (let x = v.x0; x <= v.x1; x++) {
-    const o = state.objs[idx(x, y)];
-    if ((o === 'chest' || o === 'chestOpen') && tileSeen(x, y)) drawChest(x, y, o === 'chestOpen');
+  for (const d of state.doors) if (doorSeen(d)) drawBridge(d);
+  for (let r = 0; r < RW * RW; r++) {
+    if (!onScreen(r)) continue;
+    const R = state.rooms[r], boss = TEMPLATES[R.tpl].use === 'boss';
+    withCard(r, (face, c) => {
+      ctx.save(); rrp(ctx, c.x, c.y, CARD, CARD, radius); ctx.clip();
+      if (!face) ctx.drawImage(artImage('cards', boss ? 'back_boss' : 'back') || paintedBack(boss), c.x, c.y, CARD, CARD);
+      else {
+        ctx.drawImage(artImage('rooms', R.tpl, R.variant) || paintedRoom(R.tpl), c.x, c.y, CARD, CARD);
+        if (flipOf(r) >= 1) { // what sits in the exits, the chests, then this card's light
+          for (const side of 'nsew') {
+            const d = R.exits[side];
+            drawExitPiece(r, side, d < 0 ? (artImage('props', 'rubble') || paintedRubble()) : (artImage('doors', state.doors[d].open ? 'open' : 'closed') || paintedDoor(state.doors[d].open)));
+          }
+          for (let ly = 1; ly < ROOM - 1; ly++) for (let lx = 1; lx < ROOM - 1; lx++) {
+            const x = R.rc * ROOM + lx, y = R.rr * ROOM + ly, o = state.objs[idx(x, y)];
+            if (o === 'chest' || o === 'chestOpen') drawChest(x, y, o === 'chestOpen');
+          }
+        }
+        // darkness: this card's 12x12 pixels of the light map, smoothed over it
+        ctx.drawImage(lightCanvas, R.rc * ROOM, R.rr * ROOM, ROOM, ROOM, c.x, c.y, CARD, CARD);
+      }
+      ctx.restore();
+      ctx.lineWidth = 5; ctx.strokeStyle = face ? 'rgba(20,14,10,0.9)' : (boss ? '#5a2420' : '#3a3228');
+      rrp(ctx, c.x, c.y, CARD, CARD, radius); ctx.stroke();
+    });
   }
-  ctx.drawImage(lightCanvas, 0, 0, N * TS, N * TS); // darkness and fog
+  for (const d of state.doors) { // a door seen from a face-up card shows its half there; the far half on a face-down card waits
+    if (!doorSeen(d)) continue;
+    const [a, b] = d.rooms;
+    for (const [r, side] of [[a, d.orient === 'v' ? 'e' : 's'], [b, d.orient === 'v' ? 'w' : 'n']]) {
+      if (state.revealed[r]) continue;
+      // the half on the face-down card shows as a closed door on its edge, so the way on is visible
+      if (onScreen(r)) withCard(r, () => drawExitPiece(r, side, artImage('doors', 'closed') || paintedDoor(false)));
+    }
+  }
   drawHighlights();
   for (const t of state.torches) { // torch light flickers over the dark
-    if (!state.revealed[t.room] || t.x < v.x0 || t.x > v.x1 || t.y < v.y0 || t.y > v.y1) continue;
+    if (flipOf(t.room) < 0.5 || t.x < v.x0 || t.x > v.x1 || t.y < v.y0 || t.y > v.y1) continue;
     const p = wpos(t.lx, t.ly);
     glow(p.x, p.y, TS * 1.3 + Math.sin(state.t * 13 + t.x) * 5, 'rgba(255,150,60,0.22)');
   }
@@ -1398,8 +1563,9 @@ function drawBoard() {
   ctx.restore();
   drawPops();
 }
-function tileMark(x, y, fill, stroke, lw = 1.5, w = 1, h = 1) {
-  rrp(ctx, x * TS + 4, y * TS + 4, w * TS - 8, h * TS - 8, 8);
+function tileMark(x, y, fill, stroke, lw = 1.5, w = 1, h = 1) { // w x h cells from (x, y); spans a gap when it crosses one
+  const x0 = cellX(x), y0 = cellY(y), x1 = cellX(x + w - 1) + TS, y1 = cellY(y + h - 1) + TS;
+  rrp(ctx, x0 + 4, y0 + 4, x1 - x0 - 8, y1 - y0 - 8, 8);
   if (fill) { ctx.fillStyle = fill; ctx.fill(); }
   if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
 }
@@ -1603,13 +1769,14 @@ function drawHUD() {
   }
   drawTooltip();
 }
-function drawMinimap() { // the 5x5 rooms: what is open, the doors you have seen, where everyone is
+function drawMinimap() { // the 5x5 cards: face up or down, the doors you have seen, where everyone is
   const S = tune.minimap_size, c = S / RW, x0 = W - 12 - S - 6, y0 = 98;
   panel(x0 - 6, y0 - 6, S + 12, S + 12, '#6a5a3a', 'rgba(10,8,14,0.88)');
   for (let r = 0; r < RW * RW; r++) {
-    const rx = x0 + (r % RW) * c, ry = y0 + ((r / RW) | 0) * c;
-    ctx.fillStyle = state.revealed[r] ? '#6e6456' : '#1a1924'; ctx.fillRect(rx + 2, ry + 2, c - 4, c - 4);
-    if (r === BOSS_ROOM) { ctx.strokeStyle = '#d0453a'; ctx.lineWidth = 2; ctx.strokeRect(rx + 3, ry + 3, c - 6, c - 6); }
+    const rx = x0 + (r % RW) * c, ry = y0 + ((r / RW) | 0) * c, boss = r === BOSS_ROOM;
+    rrect(rx + 2.5, ry + 2.5, c - 5, c - 5, 3);
+    ctx.fillStyle = state.revealed[r] ? '#6e6456' : (boss ? '#3a1a1c' : '#2a2632'); ctx.fill();
+    if (boss) { ctx.strokeStyle = '#d0453a'; ctx.lineWidth = 2; ctx.stroke(); }
   }
   for (const d of state.doors) {
     if (!doorSeen(d)) continue;
@@ -1617,10 +1784,10 @@ function drawMinimap() { // the 5x5 rooms: what is open, the doors you have seen
     ctx.fillStyle = d.open ? '#e8c45a' : '#9a5e2a'; ctx.fillRect(mx - 3, my - 3, 6, 6);
   }
   for (const h of state.heroes) C(x0 + (h.x + 0.5) / N * S, y0 + (h.y + 0.5) / N * S, 3.5, h.downed ? '#777' : PLAYER_COLORS[h.player], 1);
-  const v = { x: (cam.x - W / 2 / cam.zoom) / (N * TS) * S, y: (cam.y - H / 2 / cam.zoom) / (N * TS) * S };
+  const p = pitch(), v = { x: (cam.x - W / 2 / cam.zoom) / p * c, y: (cam.y - H / 2 / cam.zoom) / p * c };
   ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, S, S); ctx.clip();
   ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.2;
-  ctx.strokeRect(x0 + v.x, y0 + v.y, W / cam.zoom / (N * TS) * S, H / cam.zoom / (N * TS) * S);
+  ctx.strokeRect(x0 + v.x, y0 + v.y, W / cam.zoom / p * c, H / cam.zoom / p * c);
   ctx.restore();
   ui.push({ x: x0, y: y0, w: S, h: S, act: () => {
     const rc = clamp(Math.floor((mouse.x - x0) / c), 0, RW - 1), rr = clamp(Math.floor((mouse.y - y0) / c), 0, RW - 1);
@@ -1718,7 +1885,9 @@ const scenes = {
       if (pressed('ArrowDown') || pressed('KeyS')) setup.row = (setup.row + 1) % rows;
       const dir = (pressed('ArrowRight') || pressed('KeyD')) ? 1 : (pressed('ArrowLeft') || pressed('KeyA')) ? -1 : 0;
       if (dir) changeSetup(setup.row, dir);
-      for (let k = 1; k <= 4; k++) if (pressed('Digit' + k)) { setup.count = k; setup.row = Math.min(setup.row, k); }
+      const turn = pressed('KeyE') ? 1 : pressed('KeyQ') ? -1 : 0;
+      if (turn && setup.row > 0) changeCorner(setup.row - 1, turn);
+      for (let k = 1; k <= 4; k++) if (pressed('Digit' + k)) { setup.count = k; setup.row = Math.min(setup.row, k); fixCorners(); }
       if (pressed('Escape')) scene = 'title';
       if (pressed('Enter') || pressed('Space')) startGame();
     },
@@ -1726,7 +1895,7 @@ const scenes = {
       backdrop();
       textO('Prepara la partida', W / 2, 70, 44, '#f2c46a');
       panel(W / 2 - 360, 112, 720, 120 + setup.count * 76, '#8a6a3a', 'rgba(10,8,14,0.86)');
-      const rowY = r => 160 + (r === 0 ? 0 : 40 + (r - 1) * 76);
+      const rowY = r => 152 + (r === 0 ? 0 : 66 + (r - 1) * 76);
       if (setup.row === 0) { rrect(W / 2 - 340, rowY(0) - 26, 680, 52, 8); ctx.fillStyle = 'rgba(255,215,110,0.12)'; ctx.fill(); }
       text('Jugadores', W / 2 - 300, rowY(0), 24, '#f4e6c4', 'left', true);
       arrowBtn(W / 2 + 100, rowY(0), -1, () => changeSetup(0, -1));
@@ -1735,17 +1904,20 @@ const scenes = {
       for (let i = 0; i < setup.count; i++) {
         const y = rowY(i + 1);
         if (setup.row === i + 1) { rrect(W / 2 - 340, y - 36, 680, 72, 8); ctx.fillStyle = 'rgba(255,215,110,0.12)'; ctx.fill(); }
-        C(W / 2 - 300, y, 10, PLAYER_COLORS[i], 2);
-        text(`Jugador ${i + 1}`, W / 2 - 280, y, 22, '#f4e6c4', 'left', true);
-        text(['esquina noroeste', 'esquina sureste', 'esquina noreste', 'esquina suroeste'][i], W / 2 - 280, y + 24, 14, '#a89e8c', 'left');
+        C(W / 2 - 300, y - 12, 10, PLAYER_COLORS[i], 2);
+        text(`Jugador ${i + 1}`, W / 2 - 280, y - 12, 22, '#f4e6c4', 'left', true);
+        smallArrow(W / 2 - 290, y + 20, -1, () => changeCorner(i, -1));
+        text(`esquina ${CORNER_NAMES[setup.corners[i]]}`, W / 2 - 200, y + 20, 15, '#e8d6a8', 'center');
+        smallArrow(W / 2 - 110, y + 20, 1, () => changeCorner(i, 1));
         arrowBtn(W / 2 + 40, y, -1, () => changeSetup(i + 1, -1));
         drawFigure(setup.classes[i], W / 2 + 100, y + 28, 0.95);
         text(CLASS_INFO[setup.classes[i]].name, W / 2 + 186, y, 22, '#ffffff', 'center', true);
         arrowBtn(W / 2 + 270, y, 1, () => changeSetup(i + 1, 1));
       }
+      drawCornerPicker(W / 2 + 380, 112);
       const by = 112 + 120 + setup.count * 76 + 20;
       button(W / 2 - 130, by, 260, 48, 'Entrar en la mazmorra (Enter)', true, startGame);
-      text('Flechas: elegir y cambiar · 1-4: número de jugadores · Esc: volver', W / 2, by + 74, 16, '#b8ae9c');
+      text('Flechas: elegir y cambiar la clase · Q / E: esquina · 1-4: número de jugadores · Esc: volver', W / 2, by + 74, 16, '#b8ae9c');
     },
   },
   play: {
@@ -1806,10 +1978,35 @@ const scenes = {
   },
 };
 function changeSetup(row, dir) {
-  if (row === 0) { setup.count = clamp(setup.count + dir, 1, 4); setup.row = Math.min(setup.row, setup.count); }
+  if (row === 0) { setup.count = clamp(setup.count + dir, 1, 4); setup.row = Math.min(setup.row, setup.count); fixCorners(); }
   else { const i = row - 1, k = CLASSES.indexOf(setup.classes[i]); setup.classes[i] = CLASSES[(k + dir + 4) % 4]; }
 }
-function startGame() { reset(); scene = 'play'; events.push({ type: 'start', players: setup.count, classes: setup.classes.slice(0, setup.count) }); }
+function fixCorners() { // two players never share a corner: a clash takes the first free one
+  for (let i = 0; i < setup.count; i++) if (setup.corners.slice(0, i).includes(setup.corners[i]))
+    setup.corners[i] = CORNER_ROOMS.find(c => !setup.corners.slice(0, i).includes(c));
+}
+function changeCorner(i, dir) { // the next corner round the table; a player already there swaps with this one
+  const order = [0, 4, 24, 20], next = order[(order.indexOf(setup.corners[i]) + dir + 4) % 4];
+  const other = setup.corners.slice(0, setup.count).indexOf(next);
+  if (other >= 0) setup.corners[other] = setup.corners[i];
+  setup.corners[i] = next;
+}
+function smallArrow(x, y, dir, act) {
+  P([x - 6 * dir, y - 8, x + 6 * dir, y, x - 6 * dir, y + 8], '#c9a24a', 1.5);
+  ui.push({ x: x - 14, y: y - 14, w: 28, h: 28, act });
+}
+function drawCornerPicker(x, y) { // the table from above: which corner each player starts in
+  const s = 34, g = 5, S = RW * s + (RW - 1) * g;
+  panel(x - 14, y, S + 28, S + 60, '#6a5a3a', 'rgba(10,8,14,0.86)');
+  text('La mesa', x + S / 2, y + 22, 17, '#f4e6c4', 'center', true);
+  for (let r = 0; r < RW * RW; r++) {
+    const cx = x + (r % RW) * (s + g), cy = y + 40 + ((r / RW) | 0) * (s + g), p = setup.corners.slice(0, setup.count).indexOf(r);
+    rrect(cx, cy, s, s, 4); ctx.fillStyle = p >= 0 ? '#6e6456' : r === BOSS_ROOM ? '#3a1a1c' : '#2a2632'; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = r === BOSS_ROOM ? '#d0453a' : '#4a4038'; ctx.stroke();
+    if (p >= 0) { C(cx + s / 2, cy + s / 2, 9, PLAYER_COLORS[p], 2); text(`${p + 1}`, cx + s / 2, cy + s / 2 + 1, 12, '#10080a', 'center', true); }
+  }
+}
+function startGame() { reset(); scene = 'play'; events.push({ type: 'start', players: setup.count, classes: setup.classes.slice(0, setup.count), corners: setup.corners.slice(0, setup.count) }); }
 
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------
 function step() {

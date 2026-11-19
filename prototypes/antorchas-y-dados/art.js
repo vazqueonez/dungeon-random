@@ -7,13 +7,18 @@
 // Each file also gets an entry in assets/provenance.yaml.
 //
 // Sizes: one cell is any size, 64 px recommended. Every image is seen from straight above.
-//   rooms.<template>  a whole 12x12-cell room (768x768 at 64 px), matching its map in rooms.js.
-//                     A list of paths gives variants; each room picks one by the seed.
-//                     Paint the doorways (cells 5-6 of each side) as plain wall.
+//   rooms.<card id>   a whole card, 12x12 cells (768x768 at 64 px), matching its map in rooms.js,
+//                     with square corners (the game rounds them). Paint all 4 exits (cells 5-6
+//                     of each side) as openings in the wall: the game fills each one with a door
+//                     or with rubble. A list of paths gives variants; the seed picks one.
+//   cards.back        the back of a main-deck card, 768x768: what a face-down card shows.
+//   cards.back_boss   the back of the boss-deck card, 768x768.
 //   doors.closed / doors.open
-//                     2x2 cells (128x128), a doorway in a north or south wall: two cells wide,
-//                     the passage running top to bottom across both rooms' walls. The game turns
-//                     it 90 degrees for east and west walls.
+//                     2x1 cells (128x64): the half of a door that sits in one card's exit,
+//                     painted for a north exit (top edge = the card's edge). The game turns it
+//                     for the other sides; the threshold across the gap is drawn by the game.
+//   props.rubble      2x1 cells (128x64): fallen stone filling an exit that leads nowhere,
+//                     painted for a north exit like the doors.
 //   props.chest / props.chest_open   1 cell.
 //   units.<kind>      a figure seen from above, square, transparent background, centred on its
 //                     cell and drawn 1.2 cells wide (the boss 2.2). Kinds: warrior, mage, healer,
@@ -22,12 +27,18 @@ window.ART = {
   rooms: {
     // osario: 'assets/rooms/osario.png',
     // pilares: ['assets/rooms/pilares-1.png', 'assets/rooms/pilares-2.png'],
+    // 'sala-07': 'assets/rooms/sala-07.png',
+  },
+  cards: {
+    // back: 'assets/cards/back.png',
+    // back_boss: 'assets/cards/back_boss.png',
   },
   doors: {
     // closed: 'assets/doors/closed.png',
     // open: 'assets/doors/open.png',
   },
   props: {
+    // rubble: 'assets/props/rubble.png',
     // chest: 'assets/props/chest.png',
     // chest_open: 'assets/props/chest_open.png',
   },

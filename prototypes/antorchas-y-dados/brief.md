@@ -14,6 +14,8 @@
 
 After play: "cenital con imagenes pintadas B, pero un matiz importante. Vamos a cambiar el prototipo. La mazmorra consistirá en un tablero de 5 x 5 salas. Cada sala será un grid de 12x12. Yo iré completando los asset-spec y art-bible" · elegido: una imagen pintada por sala, muro dentro de los 12x12, conexiones aleatorias por semilla
 
+After play: "No me convence vamos a volver a la vista cenital, nada de isométrico. quiero que el mapa sean 5x5 cartas como la imagen y cada carta tendrá un grid de 12x12 tiles (casillas). Al principio del juego, de entre 50 salas, se pillaran 25 colocandolas en un 5x5 en la mesa" · "Un mazo de 50 cartas decidirá todas las salas excepto la del boss que tendrá un mazo aparte con 10 posibilidades. Todas se pondrán abajo excepto las esquinas ocupadas por los héroes que previamente habrán elegido su esquina. Ejemplo si hay 1 jugador solo se levantará una esquina. Si hay 4, todas las esquinas." · elegido: salidas en los 4 lados (las que no conectan, tapadas con escombros), cartas separadas sobre la mesa
+
 **Pitch:** 1-4 héroes entran por las esquinas de una mazmorra a oscuras, abren puertas sala a sala con dados y cartas, y convergen en el centro para derribar a un jefe que no sale de su sala.
 
 **Genre:** tactical RPG + co-op (hot-seat)
@@ -27,12 +29,12 @@ After play: "cenital con imagenes pintadas B, pero un matiz importante. Vamos a 
 **Intent:** needs 1-4 players *(you said)*
 
 ## Look and references
-- Look: mazmorra cenital pintada a mano (referencia: `references/mazmorra-cenital.webp`): losas de piedra gris cálido agrietadas, muros de bloques gruesos y claros con borde oscuro, ladrillo en las subsalas, huesos, calaveras y telarañas, luz cálida ámbar alrededor de antorchas y héroes. Cada sala es una imagen pintada de 12x12 casillas (`art.js` lista las que existen; las demás las pinta el código como sustituto). El arte lo definen `/art-bible` y `/asset-spec`. Antes *(provisional)*: enemigos en verdes y violetas enfermizos con contorno oscuro; cada héroe y enemigo con silueta propia (Guerrero con escudo, Mago con capucha puntiaguda, Curandero con báculo y halo, Arquero con arco). Niebla negro-azulada con brillo tenue sobre salas sin abrir. Firma: los círculos de luz de las antorchas empujan la niebla al abrir una puerta. Toda figura dibujada: sin emoji, sin círculos lisos.
+- Look: mazmorra cenital pintada a mano (referencia: `references/mazmorra-cenital.webp`): losas de piedra gris cálido agrietadas, muros de bloques gruesos y claros con borde oscuro, ladrillo en las subsalas, huesos, calaveras y telarañas, luz cálida ámbar alrededor de antorchas y héroes. Cada sala es una carta: una imagen pintada de 12x12 casillas con una salida en cada lado, con esquinas redondeadas y sombra, separada de las demás sobre una mesa oscura; boca abajo muestra su dorso (uno para el mazo de salas y otro para el del jefe). `art.js` lista las imágenes que existen; las demás las pinta el código como sustituto. El arte lo definen `/art-bible` y `/asset-spec`. Antes *(provisional)*: enemigos en verdes y violetas enfermizos con contorno oscuro; cada héroe y enemigo con silueta propia (Guerrero con escudo, Mago con capucha puntiaguda, Curandero con báculo y halo, Arquero con arco). Niebla negro-azulada con brillo tenue sobre salas sin abrir. Firma: los círculos de luz de las antorchas empujan la niebla al abrir una puerta. Toda figura dibujada: sin emoji, sin círculos lisos.
 - References: Demeo (niebla hasta abrir la puerta, tablero de mazmorra, dados), Into the Breach (intent enemigo marcado en el tablero).
 - View: 2D cenital (vista desde arriba) *(you said)* · Camera: cenital con desplazamiento (WASD / arrastrar), zoom con rueda y minimapa que lleva a una sala; centra en el héroe activo
 
 ## First minute
-Eliges cuántos jugadores (1-4) y la clase de cada uno. Tu héroe aparece en su esquina, con su sala iluminada y el resto en niebla. Clic en él: se iluminan las casillas que alcanza. Mueves (1 PA) hasta una puerta y la abres (1 PA): la niebla se retira y aparece un esqueleto patrullando. Con el último PA, el cursor sobre él muestra "62% · 3 daño" (hay un pilar en medio). Atacas: el dado rueda, aciertas. En el turno enemigo el esqueleto te ve, pasa a "persigue" y marca a quién golpeará. Ves tu carta en enfriamiento y la otra lista para el siguiente turno.
+Eliges cuántos jugadores (1-4), la clase de cada uno y su esquina de la mesa. Se reparten 25 cartas boca abajo; solo las esquinas elegidas se giran, y tu héroe aparece en la suya. Clic en él: se iluminan las casillas que alcanza. Mueves (1 PA) hasta una puerta y la abres (1 PA): la carta de al lado se gira y aparece un esqueleto patrullando. Con el último PA, el cursor sobre él muestra "62% · 3 daño" (hay un pilar en medio). Atacas: el dado rueda, aciertas. En el turno enemigo el esqueleto te ve, pasa a "persigue" y marca a quién golpeará. Ves tu carta en enfriamiento y la otra lista para el siguiente turno.
 
 ## Challenge
 Primer combate serio hacia el turno 3, cuando dos salas abiertas sueltan a la vez un arquero goblin y esqueletos. Un héroe a 0 vida queda derribado: solo lo levanta un compañero con un Tónico (se encuentra en cofres). Si caen todos, se reinicia el nivel. El jefe espera en la sala central con escoltas, golpea en área y no sale de su sala *(provisional)*.
@@ -52,9 +54,11 @@ Leads: tactics lleva el tablero, el alcance, las coberturas, los dados y el inte
 - Perder: todos los héroes derribados a la vez; el nivel se reinicia.
 
 ## Features
-- [x] Selección de 1-4 jugadores y clase al empezar; un héroe por jugador en su esquina
-- [x] Tablero cenital de 5x5 salas, cada una de 12x12 casillas con el muro en su anillo exterior (60x60); plantillas de sala en `rooms.js`; la semilla elige plantillas, puertas (un laberinto que une todas las salas, más puertas extra) y contenido; puertas en las casillas 5-6 de cada lado; niebla por sala *(you said)*
-- [x] Minimapa de las 25 salas: abiertas, puertas vistas, héroes; clic para ir a una sala
+- [x] Selección de 1-4 jugadores, clase y esquina al empezar; un héroe por jugador en la esquina que eligió *(you said)*
+- [x] Mesa cenital de 5x5 cartas-sala separadas, cada una de 12x12 casillas con el muro en su anillo exterior y una salida en las casillas 5-6 de cada lado *(you said)*
+- [x] Dos mazos en `rooms.js`: 50 cartas de sala dan las 24 de alrededor y 10 cartas de jefe dan la del centro; la semilla baraja, reparte y elige qué salidas vecinas llevan puerta (un laberinto que une todas las cartas, más puertas extra); las salidas sin puerta, tapadas con escombros *(you said)*
+- [x] Cartas boca abajo salvo las esquinas elegidas; abrir una puerta gira la carta de al lado *(you said)*
+- [x] Minimapa de las 25 cartas: boca arriba o abajo, puertas vistas, héroes; clic para ir a una carta
 - [x] 3 PA por héroe: mover (1), atacar (1), carta (1-2), abrir puerta (1) *(guessed)*
 - [x] Dados con la probabilidad real mostrada; la cobertura baja el acierto; rachas de fallos suavizadas
 - [x] 4 clases, 2 cartas cada una con cooldown en turnos
@@ -86,7 +90,7 @@ Leads: tactics lleva el tablero, el alcance, las coberturas, los dados y el inte
 - Jugar con amigos en otro ordenador: hot-seat en la misma pantalla en su lugar (needs a server: not built yet)
 
 ## Build order
-1. El nivel completo: mapa de 5x5 salas de 12x12 con puertas y niebla (antes 25x25 de 3x3 salas); héroes elegidos en las esquinas; PA, dados y coberturas; cartas; los 3 enemigos con su IA; derribo y tónicos; el jefe en el centro. Se gana al derrotarlo, se pierde si caen todos.
+1. El nivel completo: mesa de 5x5 cartas-sala de 12x12 repartidas de dos mazos, boca abajo hasta abrir su puerta (antes 25x25 de 3x3 salas); héroes en las esquinas que eligen; PA, dados y coberturas; cartas; los 3 enemigos con su IA; derribo y tónicos; el jefe en el centro. Se gana al derrotarlo, se pierde si caen todos.
 2. Ajustar números tras jugar (vida, daño, acierto, cooldowns) en config.js.
 
 ---
