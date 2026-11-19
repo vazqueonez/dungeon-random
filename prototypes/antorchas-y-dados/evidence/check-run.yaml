@@ -1,0 +1,160 @@
+# The one-shot's small check (check-run/1).
+# Written by one-shot-check.sh --record: the results are /prototype's reading of
+# evidence/self-check.tsv; never edited by hand.
+kind: check-run/1
+engine: web
+browser: "HeadlessChrome/157.0.0.0"
+time: "2026-11-19 22:00:08"
+checks:
+  - id: boots
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: shot
+    result: pass
+    evidence:
+      - "evidence/play.png"
+  - id: outlines
+    result: pass
+    evidence:
+      - "evidence/figures.png"
+  - id: brief-words
+    result: pass
+    evidence:
+      - "evidence/brief-words.tsv"
+  - id: emoji
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: nearest-game
+    result: pass
+    evidence:
+      - "evidence/nearest-game.txt"
+brief_checklist:
+  - id: L1
+    result: pass
+    evidence: "evidence/play.png"
+    item: "Look: mazmorra-diorama isométrica iluminada por antorchas *(provisional)*: piedra fría gris-azulada (suelo), luz cálida ámbar alrededor de antorchas y héroes, enemigos en verdes y violetas enfermizos con contorno oscuro; cada héroe y enemigo con silueta propia (Guerrero con escudo, Mago con capucha puntiaguda, Curandero con báculo y halo, Arquero con arco). Niebla negro-azulada con brillo tenue sobre salas sin abrir. Firma: los círculos de luz de las antorchas empujan la niebla al abrir una puerta. Toda figura dibujada: sin emoji, sin círculos lisos."
+  - id: L2
+    result: pass
+    evidence: "index.html:1182"
+    item: "References: Demeo (niebla hasta abrir la puerta, tablero de mazmorra, dados), Into the Breach (intent enemigo marcado en el tablero)."
+  - id: L3
+    result: pass
+    evidence: "index.html:745"
+    item: "View: 2.5D (isométrico dibujado en 2D) · Camera: isométrica fija con desplazamiento (WASD / arrastrar) y zoom con rueda; centra en el héroe activo *(guessed)*"
+  - id: F1
+    result: pass
+    evidence: "index.html:1441"
+    item: "Selección de 1-4 jugadores y clase al empezar; un héroe por jugador en su esquina"
+  - id: F2
+    result: pass
+    evidence: "evidence/play.png"
+    item: "Tablero isométrico 25x25 con salas, puertas y niebla por visión"
+  - id: F3
+    result: pass
+    evidence: "index.html:379"
+    item: "3 PA por héroe: mover (1), atacar (1), carta (1-2), abrir puerta (1) *(guessed)*"
+  - id: F4
+    result: pass
+    evidence: "index.html:313"
+    item: "Dados con la probabilidad real mostrada; la cobertura baja el acierto; rachas de fallos suavizadas"
+  - id: F5
+    result: pass
+    evidence: "index.html:204"
+    item: "4 clases, 2 cartas cada una con cooldown en turnos"
+  - id: F6
+    result: pass
+    evidence: "index.html:680"
+    item: "3 enemigos (esqueleto cuerpo a cuerpo, arquero goblin a distancia, rata rápida) con patrulla → persigue → ataca e intent marcado, más el jefe inmóvil con ataque en área"
+  - id: F7
+    result: pass
+    evidence: "index.html:544"
+    item: "Derribado → Tónico (en cofres) para levantarlo"
+  - id: F8
+    result: pass
+    evidence: "evidence/play.png"
+    item: "Turno, héroe activo y objetivo (\"Derrota al jefe\") siempre en pantalla"
+  - id: S1
+    result: pass
+    evidence: "index.html:457"
+    item: "dados y azar · in the slice"
+  - id: S2
+    result: pass
+    evidence: "index.html:301"
+    item: "coberturas que bajan el acierto · in the slice"
+  - id: S3
+    result: pass
+    evidence: "index.html:352"
+    item: "niebla con puertas y visión · in the slice"
+  - id: S4
+    result: pass
+    evidence: "index.html:383"
+    item: "cartas con cooldown · in the slice"
+  - id: S5
+    result: pass
+    evidence: "index.html:680"
+    item: "IA enemiga patrulla → persigue → ataca · in the slice"
+  - id: S6
+    result: pass
+    evidence: "index.html:448"
+    item: "objetos para levantar a un derribado · in the slice"
+  - id: S7
+    result: pass
+    evidence: "index.html:1441"
+    item: "selección de jugadores al principio · in the slice"
+  - id: M1
+    result: pass
+    evidence: "index.html:1441"
+    item: "Eliges cuántos jugadores (1-4) y la clase de cada uno."
+  - id: M2
+    result: pass
+    evidence: "evidence/play.png"
+    item: "Tu héroe aparece en su esquina, con su sala iluminada y el resto en niebla."
+  - id: M3
+    result: pass
+    evidence: "index.html:1157"
+    item: "Clic en él: se iluminan las casillas que alcanza."
+  - id: M4
+    result: pass
+    evidence: "index.html:442"
+    item: "Mueves (1 PA) hasta una puerta y la abres (1 PA): la niebla se retira y aparece un esqueleto patrullando."
+  - id: M5
+    result: pass
+    evidence: "index.html:1357"
+    item: "Con el último PA, el cursor sobre él muestra \"62% · 3 daño\" (hay un pilar en medio)."
+  - id: M6
+    result: pass
+    evidence: "index.html:1227"
+    item: "Atacas: el dado rueda, aciertas."
+  - id: M7
+    result: pass
+    evidence: "index.html:1182"
+    item: "En el turno enemigo el esqueleto te ve, pasa a \"persigue\" y marca a quién golpeará."
+  - id: M8
+    result: pass
+    evidence: "index.html:1290"
+    item: "Ves tu carta en enfriamiento y la otra lista para el siguiente turno."
+  - id: C1
+    result: not_run
+    mark: not assessed
+    why: "when the first serious fight arrives depends on the players' route; the rooms and enemy counts are built (index.html:176), and the timing needs a real play"
+    item: "Primer combate serio hacia el turno 3, cuando dos salas abiertas sueltan a la vez un arquero goblin y esqueletos."
+  - id: C2
+    result: pass
+    evidence: "index.html:544"
+    item: "Un héroe a 0 vida queda derribado: solo lo levanta un compañero con un Tónico (se encuentra en cofres)."
+  - id: C3
+    result: pass
+    evidence: "index.html:419"
+    item: "Si caen todos, se reinicia el nivel."
+  - id: C4
+    result: pass
+    evidence: "index.html:707"
+    item: "El jefe espera en la sala central con escoltas, golpea en área y no sale de su sala *(provisional)*."
+measures:
+  - id: step-time
+    value: 0.400
+    unit: ms
+    by: browser
+    detail: "mean 0.010 ms, slowest 0.400 ms, 194 steps"

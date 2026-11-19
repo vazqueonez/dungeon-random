@@ -1,0 +1,6 @@
+isométrico	the board is drawn in 2:1 isometric diamonds with raised walls, pillars and figures	evidence/play.png
+grid 25x25	the dungeon is a 25x25 tile grid of nine 7x7 rooms	evidence/play.png
+fog	unopened rooms are covered in shimmering blue-black fog that retreats from the door when it opens	evidence/play.png
+como en demeo	fog until a door is opened, dice and a dungeon board, as named; Demeo itself is not copied (see nearest-game.txt)	evidence/play.png
+esquinas	heroes start in the corners of the board	evidence/play.png
+centro	El Carcelero stands in the central room and never moves	evidence/figures.png

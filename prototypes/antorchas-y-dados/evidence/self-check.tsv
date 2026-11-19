@@ -1,0 +1,76 @@
+time	2026-11-19 22:00:08
+keep	lines	0	pinned	0
+checklist	L1	unlisted	-	Look: mazmorra-diorama isométrica iluminada por antorchas *(provisional)*: piedra fría gris-azulada (suelo), luz cálida ámbar alrededor de antorchas y héroes, enemigos en verdes y violetas enfermizos con contorno oscuro; cada héroe y enemigo con silueta propia (Guerrero con escudo, Mago con capucha puntiaguda, Curandero con báculo y halo, Arquero con arco). Niebla negro-azulada con brillo tenue sobre salas sin abrir. Firma: los círculos de luz de las antorchas empujan la niebla al abrir una puerta. Toda figura dibujada: sin emoji, sin círculos lisos.	
+checklist	L2	unlisted	-	References: Demeo (niebla hasta abrir la puerta, tablero de mazmorra, dados), Into the Breach (intent enemigo marcado en el tablero).	
+checklist	L3	unlisted	-	View: 2.5D (isométrico dibujado en 2D) · Camera: isométrica fija con desplazamiento (WASD / arrastrar) y zoom con rueda; centra en el héroe activo *(guessed)*	
+checklist	F1	unlisted	-	Selección de 1-4 jugadores y clase al empezar; un héroe por jugador en su esquina	
+checklist	F2	unlisted	-	Tablero isométrico 25x25 con salas, puertas y niebla por visión	
+checklist	F3	unlisted	-	3 PA por héroe: mover (1), atacar (1), carta (1-2), abrir puerta (1) *(guessed)*	
+checklist	F4	unlisted	-	Dados con la probabilidad real mostrada; la cobertura baja el acierto; rachas de fallos suavizadas	
+checklist	F5	unlisted	-	4 clases, 2 cartas cada una con cooldown en turnos	
+checklist	F6	unlisted	-	3 enemigos (esqueleto cuerpo a cuerpo, arquero goblin a distancia, rata rápida) con patrulla → persigue → ataca e intent marcado, más el jefe inmóvil con ataque en área	
+checklist	F7	unlisted	-	Derribado → Tónico (en cofres) para levantarlo	
+checklist	F8	unlisted	-	Turno, héroe activo y objetivo ("Derrota al jefe") siempre en pantalla	
+checklist	S1	unlisted	-	dados y azar · in the slice	
+checklist	S2	unlisted	-	coberturas que bajan el acierto · in the slice	
+checklist	S3	unlisted	-	niebla con puertas y visión · in the slice	
+checklist	S4	unlisted	-	cartas con cooldown · in the slice	
+checklist	S5	unlisted	-	IA enemiga patrulla → persigue → ataca · in the slice	
+checklist	S6	unlisted	-	objetos para levantar a un derribado · in the slice	
+checklist	S7	unlisted	-	selección de jugadores al principio · in the slice	
+checklist	M1	unlisted	-	Eliges cuántos jugadores (1-4) y la clase de cada uno.	
+checklist	M2	unlisted	-	Tu héroe aparece en su esquina, con su sala iluminada y el resto en niebla.	
+checklist	M3	unlisted	-	Clic en él: se iluminan las casillas que alcanza.	
+checklist	M4	unlisted	-	Mueves (1 PA) hasta una puerta y la abres (1 PA): la niebla se retira y aparece un esqueleto patrullando.	
+checklist	M5	unlisted	-	Con el último PA, el cursor sobre él muestra "62% · 3 daño" (hay un pilar en medio).	
+checklist	M6	unlisted	-	Atacas: el dado rueda, aciertas.	
+checklist	M7	unlisted	-	En el turno enemigo el esqueleto te ve, pasa a "persigue" y marca a quién golpeará.	
+checklist	M8	unlisted	-	Ves tu carta en enfriamiento y la otra lista para el siguiente turno.	
+checklist	C1	unlisted	-	Primer combate serio hacia el turno 3, cuando dos salas abiertas sueltan a la vez un arquero goblin y esqueletos.	
+checklist	C2	unlisted	-	Un héroe a 0 vida queda derribado: solo lo levanta un compañero con un Tónico (se encuentra en cofres).	
+checklist	C3	unlisted	-	Si caen todos, se reinicia el nivel.	
+checklist	C4	unlisted	-	El jefe espera en la sala central con escoltas, golpea en área y no sale de su sala *(provisional)*.	
+browser	HeadlessChrome/157.0.0.0
+scene	play	0	title
+scene	play	1	setup
+scene	play	5	play
+digits	log	20px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	3.682
+digits	log	17px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	3.129
+digits	log	bold 19px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	4.017
+digits	log	15px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	2.761
+digits	log	bold 15px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	3.171
+digits	log	14px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	2.577
+digits	log	16px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	2.945
+digits	log	bold 34px Georgia, "Palatino Linotype", "Book Antiqua", serif	proportional	7.188
+measure	step-time	play	0.010	0.400	194
+lane	play	stop	3.2	160
+uncaught	play	0
+text	play	canvas	48,25,310,43	25.5	15.64	inside	Ronda 1 · Jugador 2 · Mago
+text	play	canvas	30,55,50,66	21.0	12.19	inside	PA
+text	play	canvas	133,54,206,69	21.0	12.11	inside	Vida 10/10
+text	play	canvas	924,25,1218,43	25.5	15.56	inside	Objetivo: derrota a El Carcelero
+text	play	canvas	924,54,1206,69	21.0	8.83	inside	Espera en la sala central. No saldrá de ella.
+text	play	canvas	71,106,165,117	21.0	15.53	inside	J1 Guerrero
+text	play	canvas	178,125,213,140	19.5	12.19	inside	16/16
+text	play	canvas	240,111,249,118	19.5	12.19	inside	0
+text	play	canvas	71,156,137,170	21.0	12.27	inside	J2 Mago
+text	play	canvas	178,175,214,190	19.5	9.49	inside	10/10
+text	play	canvas	240,161,249,168	19.5	9.50	inside	0
+text	play	canvas	378,602,496,619	24.0	12.55	inside	Bola de fuego
+text	play	canvas	377,627,494,643	19.5	9.79	inside	Área 3x3 a la vista:
+text	play	canvas	378,647,497,661	19.5	9.79	inside	4 daño a enemigos.
+text	play	canvas	378,665,479,679	19.5	9.79	inside	Siempre acierta.
+text	play	canvas	562,691,568,698	19.5	4.62	inside	1
+text	play	canvas	602,602,686,619	24.0	12.55	inside	Parpadeo
+text	play	canvas	601,629,726,643	19.5	9.79	inside	Te teletransportas a
+text	play	canvas	602,647,721,661	19.5	9.79	inside	una casilla libre a 4
+text	play	canvas	602,669,658,676	19.5	9.79	inside	o menos.
+text	play	canvas	784,691,792,698	19.5	4.62	inside	2
+text	play	canvas	872,602,969,617	21.0	6.52	inside	Tónico (T) · 0
+text	play	canvas	851,642,991,657	21.0	6.52	inside	Deshacer mover (Z)
+text	play	canvas	842,683,1000,698	21.0	11.89	inside	Fin de turno (Espacio)
+text	play	canvas	16,643,322,657	19.5	16.36	inside	Objetivo: derrota a El Carcelero en la sala central.
+text	play	canvas	490,111,789,144	46.5	4.77	inside	Jugador 2 · Mago
+screen	play	drawn
+shot	play	prototypes/antorchas-y-dados/evidence/play.png
+responds	changed	8

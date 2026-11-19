@@ -1,0 +1,30 @@
+L1	pass	evidence/play.png	isometric dungeon diorama: cool blue-grey stone, warm amber torch and hero light, blue-black fog over unopened rooms; every figure drawn with its own outline (figures.png); fog retreats radially from the opened door (index.html:369)
+L2	pass	index.html:1182	fog lifts only when a door opens (index.html:352), d20 dice (index.html:457), and each enemy's target marked on the board with a dashed line and crosshair
+L3	pass	index.html:745	2D-drawn isometric board; camera pans with arrows/WASD or right-drag, zooms with the wheel or Q/E, and recentres on the active hero at each turn (index.html:379)
+F1	pass	index.html:1441	setup screen picks 1-4 players and each player's class; each hero starts in its own corner (index.html:172)
+F2	pass	evidence/play.png	25x25 grid of nine 7x7 rooms with 12 doors; unopened rooms in fog (index.html:369)
+F3	pass	index.html:379	3 AP per turn (config ap_per_turn); move 1, attack 1, open door or chest 1, cards 1-2 (config *_cost)
+F4	pass	index.html:313	tooltip shows the real chance and the d20 roll needed, with cover and distance penalties itemised; each consecutive hero miss adds miss_pity to the next chance
+F5	pass	index.html:204	4 classes with 2 cards each; cooldown set on use and counted down at the hero's turn start (index.html:383); shown on the card (evidence/play.png)
+F6	pass	index.html:680	skeleton melee, goblin archer keeps range, fast rat; patrol, then chase on sight, then attack; eye icon shows patrol or chase (index.html:1110), target line shows intent (index.html:1182); boss never moves and slams a marked 3x3 (index.html:707)
+F7	pass	index.html:544	a hero at 0 HP is downed; chests give a Tónico (index.html:448); used on an adjacent downed ally it raises them at tonic_revive_hp %, or the holder drinks it
+F8	pass	evidence/play.png	top-left shows round, player and class, AP and HP; top-right shows the goal and the boss bar once awake
+S1	pass	index.html:457	every hero and enemy attack rolls a d20 from the seeded rng, shown as a die with the number needed
+S2	pass	index.html:301	pillars and chests on the line or beside the target on the shooter's side each cost cover_penalty %; enemy archers seek tiles with less cover too
+S3	pass	index.html:352	rooms open only through doors; enemies in unopened rooms stay hidden and dormant
+S4	pass	index.html:383	card cooldowns tick each own turn; a card in cooldown shows "Recarga: N"
+S5	pass	index.html:680	patrol between two waypoints, chase what they see (or the last place seen), attack in range
+S6	pass	index.html:448	chests hold Tónicos that raise a downed ally
+S7	pass	index.html:1441	player count and classes chosen before the game
+M1	pass	index.html:1441	setup screen: number of players and a class each
+M2	pass	evidence/play.png	the hero's corner room is lit and the rest of the board is fog
+M3	pass	index.html:1157	the active hero's reachable tiles are lit blue at once; no click on the hero is needed (a small change from the line)
+M4	pass	index.html:442	opening a door costs 1 AP, the fog retreats from the door, and the room's enemies wake on patrol
+M5	pass	index.html:1357	hovering an enemy shows "Ataque: N% (X+ en d20) · D daño" with the cover penalty listed; the exact 62% of the line is not a possible value here, since chances move in 5% steps
+M6	pass	index.html:1227	attacking shows a tumbling d20, then its number, colour for hit or miss, and the needed roll
+M7	pass	index.html:1182	on the enemy turn a skeleton that sees a hero shows "¡Alerta!", its eye turns red and a dashed line marks who it goes for
+M8	pass	index.html:1290	after a card is used, its face shows "Recarga: N turnos" while the other stays ready
+C1	not_assessed	-	when the first serious fight arrives depends on the players' route; the rooms and enemy counts are built (index.html:176), and the timing needs a real play
+C2	pass	index.html:544	downed heroes are raised only by a Tónico from a chest, used by an adjacent ally
+C3	pass	index.html:419	when every hero is down the game-over screen offers R, Enter or a click to retry the level
+C4	pass	index.html:707	the boss waits in the central room with skeleton escorts, never moves, marks a 3x3 slam and hits adjacent heroes

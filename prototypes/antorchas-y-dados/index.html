@@ -1,0 +1,1858 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: ¿Es divertido coordinar 3 PA por héroe entre salas con niebla, dados y cartas con cooldown hasta llegar al jefe? -->
+<!-- Date: 2026-11-19 -->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antorchas y Dados</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script src="config.js"></script>
+<script src="rooms.js"></script>
+<script src="art.js"></script>
+<script>
+'use strict';
+// Antorchas y Dados: a co-op tactics board for 1-4 heroes on one screen (hot seat).
+// Kept from the one-shot starter: the fixed step, the clock hook, window.game, and the
+// play and figures scenes the checks read.
+
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 1280, H = 720;        // logical size
+const PIXEL = false;
+const FONT = 'Georgia, "Palatino Linotype", "Book Antiqua", serif';
+const TITLE = 'Antorchas y Dados';
+const CONTROLS = [
+  'Clic en una casilla azul: mover (1 PA)',
+  'Clic en un enemigo: atacar (1 PA) · en una puerta o cofre al lado: abrir (1 PA)',
+  'Clic en una carta o teclas 1 / 2: usarla · clic derecho o Esc: cancelar',
+  'Espacio: fin de turno · Z: deshacer movimiento · T: tónico',
+  'Flechas / WASD o arrastrar con clic derecho: cámara · rueda: zoom · C: centrar · minimapa: ir a una sala',
+  'M: silencio',
+];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let baseTransform;
+function fit() {
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  canvas.style.imageRendering = PIXEL ? 'pixelated' : 'auto';
+  ctx.setTransform(r, 0, 0, r, 0, 0); ctx.imageSmoothingEnabled = !PIXEL;
+  baseTransform = ctx.getTransform();
+}
+addEventListener('resize', fit); fit();
+function clear(c) { ctx.fillStyle = c; ctx.fillRect(0, 0, W, H); }
+function text(s, x, y, size, c, align = 'center', bold = false) {
+  ctx.fillStyle = c; ctx.font = `${bold ? 'bold ' : ''}${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.textBaseline = 'middle'; ctx.fillText(s, x, y);
+}
+function textO(s, x, y, size, c, align = 'center', bold = true) { // outlined text over the board
+  ctx.font = `${bold ? 'bold ' : ''}${size}px ${FONT}`; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(3, size / 5); ctx.strokeStyle = 'rgba(8,6,12,0.95)';
+  ctx.strokeText(s, x, y); ctx.fillStyle = c; ctx.fillText(s, x, y);
+}
+
+// ---- Input: keys by position (event.code), OS key repeat ignored ------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code);
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow') || e.code === 'Tab') e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => down.clear());
+
+// Pointer: clicks are queued and handled on the step; the camera drag is view only.
+const mouse = { x: -1, y: -1 };
+const clicks = [];
+let drag = null, wheel = 0;
+function toLogical(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+canvas.addEventListener('pointerdown', e => {
+  startAudio();
+  const p = toLogical(e); mouse.x = p.x; mouse.y = p.y;
+  if (e.button === 1 || e.button === 2) drag = { x: p.x, y: p.y, moved: 0, button: e.button };
+  else clicks.push({ x: p.x, y: p.y, button: 0 });
+});
+addEventListener('pointermove', e => {
+  const p = toLogical(e);
+  if (drag) {
+    const dx = p.x - mouse.x, dy = p.y - mouse.y;
+    drag.moved += Math.abs(dx) + Math.abs(dy);
+    cam.x -= dx / cam.zoom; cam.y -= dy / cam.zoom; cam.follow = false;
+  }
+  mouse.x = p.x; mouse.y = p.y;
+});
+addEventListener('pointerup', () => {
+  if (drag && drag.moved < 6 && drag.button === 2) clicks.push({ x: drag.x, y: drag.y, button: 2 });
+  drag = null;
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('wheel', e => { e.preventDefault(); wheel += Math.sign(e.deltaY); }, { passive: false });
+
+// ---- Audio: started on first input, mute on M --------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)();
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'square', vol = 0.3, delay = 0, slideTo = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur);
+}
+function sfx(name) {
+  switch (name) {
+    case 'step': tone(180, 0.06, 'triangle', 0.12); break;
+    case 'door': tone(110, 0.4, 'sawtooth', 0.12, 0, 60); tone(70, 0.3, 'square', 0.08, 0.1); break;
+    case 'chest': tone(520, 0.1, 'triangle', 0.18); tone(780, 0.18, 'triangle', 0.16, 0.08); break;
+    case 'dice': for (let i = 0; i < 4; i++) tone(700 + i * 90, 0.03, 'square', 0.06, i * 0.06); break;
+    case 'hit': tone(150, 0.14, 'square', 0.22, 0.25, 70); break;
+    case 'crit': tone(150, 0.2, 'sawtooth', 0.25, 0.25, 50); tone(900, 0.15, 'triangle', 0.15, 0.25); break;
+    case 'miss': tone(520, 0.1, 'sine', 0.14, 0.25, 300); break;
+    case 'heal': tone(660, 0.2, 'sine', 0.16); tone(880, 0.25, 'sine', 0.14, 0.1); break;
+    case 'fire': tone(90, 0.45, 'sawtooth', 0.22, 0, 40); break;
+    case 'slam': tone(55, 0.6, 'sawtooth', 0.3, 0, 30); break;
+    case 'alert': tone(440, 0.08, 'square', 0.12); tone(330, 0.1, 'square', 0.12, 0.08); break;
+    case 'down': tone(330, 0.25, 'triangle', 0.2); tone(220, 0.35, 'triangle', 0.2, 0.2); break;
+    case 'card': tone(400, 0.08, 'triangle', 0.14); tone(600, 0.1, 'triangle', 0.12, 0.06); break;
+    case 'win': [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.3, 'triangle', 0.18, i * 0.14)); break;
+    case 'lose': [330, 262, 196].forEach((f, i) => tone(f, 0.4, 'triangle', 0.18, i * 0.2)); break;
+  }
+}
+
+// ---- The game: the dungeon ---------------------------------------------------------------
+// 5x5 rooms of 12x12 cells, seen from above. rooms.js holds the room templates and art.js the
+// painted images; the seed picks each room's template, which neighbours connect, and what is
+// inside.
+const ROOM = 12, RW = 5, N = ROOM * RW, TS = 64; // TS: world px per cell
+const T_WALL = 0, T_FLOOR = 1, T_DOOR = 2, T_OPEN = 3;
+const DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const BOSS_ROOM = 12; // the centre room
+// Players take the corner rooms in this order: opposite corners first, so two heroes converge.
+const CORNER_ROOMS = [0, 24, 4, 20];
+const DOORWAY = [5, 6]; // the cells of each side that open when two rooms connect
+const TEMPLATES = window.ROOMS || {};
+const ARTS = window.ART || {};
+const TEMPLATE_IDS = Object.keys(TEMPLATES);
+const tplOf = use => TEMPLATE_IDS.filter(k => TEMPLATES[k].use === use);
+function checkTemplates() { // the rules rooms.js states; a broken template is named in the console
+  for (const id of TEMPLATE_IDS) {
+    const m = TEMPLATES[id].map, bad = [];
+    if (!Array.isArray(m) || m.length !== ROOM || m.some(r => r.length !== ROOM)) bad.push('no es de 12x12');
+    else {
+      for (let i = 0; i < ROOM; i++) for (const [x, y] of [[i, 0], [i, ROOM - 1], [0, i], [ROOM - 1, i]]) if (!'#t'.includes(m[y][x])) bad.push(`anillo abierto en ${x},${y}`);
+      for (const d of DOORWAY) for (const [x, y] of [[d, 1], [d, ROOM - 2], [1, d], [ROOM - 2, d]]) if (m[y][x] !== '.') bad.push(`entrada tapada en ${x},${y}`);
+      const open = (x, y) => m[y] && (m[y][x] === '.');
+      let floor = 0; for (const r of m) for (const ch of r) if (ch === '.') floor++;
+      const seen = new Set([`${DOORWAY[0]},1`]), q = [[DOORWAY[0], 1]];
+      while (q.length) {
+        const [x, y] = q.pop();
+        for (const [dx, dy] of DIR4) { const k = `${x + dx},${y + dy}`; if (!seen.has(k) && open(x + dx, y + dy)) { seen.add(k); q.push([x + dx, y + dy]); } }
+      }
+      if (seen.size < floor) bad.push(`${floor - seen.size} casillas de suelo sin camino`);
+    }
+    if (bad.length) console.warn(`rooms.js: ${id}: ${bad.slice(0, 3).join(', ')}`);
+  }
+}
+checkTemplates();
+
+const CLASSES = ['warrior', 'mage', 'healer', 'archer'];
+const CLASS_INFO = {
+  warrior: { name: 'Guerrero', cards: ['charge', 'shout'] },
+  mage: { name: 'Mago', cards: ['fireball', 'blink'] },
+  healer: { name: 'Curandero', cards: ['heal', 'ward'] },
+  archer: { name: 'Arquero', cards: ['aimed', 'volley'] },
+};
+const ENEMY_NAMES = { skeleton: 'Esqueleto', goblin: 'Arquero goblin', rat: 'Rata de cripta', boss: 'El Carcelero' };
+const PLAYER_COLORS = ['#e8573f', '#3f8fe8', '#e8c43f', '#4fc46a'];
+const CARDS = {
+  charge: { name: 'Embestida', target: 'enemyAdj', text: () => [`Empuja ${tune.charge_push} casillas a un`, `enemigo al lado: ${tune.charge_dmg} daño,`, `+${tune.charge_crash} si choca.`] },
+  shout: { name: 'Grito de guardia', target: 'self', text: () => [`Enemigos a ${tune.shout_radius} o menos`, 'van a por ti este', `turno. Escudo ${tune.shout_shield}.`] },
+  fireball: { name: 'Bola de fuego', target: 'area', range: 'fireball_range', text: () => ['Área 3x3 a la vista:', `${tune.fireball_dmg} daño a enemigos.`, 'Siempre acierta.'] },
+  blink: { name: 'Parpadeo', target: 'tile', range: 'blink_range', text: () => ['Te teletransportas a', `una casilla libre a ${tune.blink_range}`, 'o menos.'] },
+  heal: { name: 'Sanar', target: 'ally', range: 'heal_range', text: () => [`Cura ${tune.heal_amount} a un aliado`, `a ${tune.heal_range} casillas o menos`, '(o a ti).'] },
+  ward: { name: 'Escudo de luz', target: 'ally', range: 'ward_range', text: () => [`Escudo ${tune.ward_shield} a un aliado`, `a ${tune.ward_range} o menos, hasta`, 'el fin del turno enemigo.'] },
+  aimed: { name: 'Disparo certero', target: 'enemy', text: () => ['Ataque que ignora la', `cobertura, +${tune.aimed_bonus_hit}% y`, `+${tune.aimed_bonus_dmg} daño.`] },
+  volley: { name: 'Lluvia de flechas', target: 'area', range: 'volley_range', text: () => ['Área 3x3 a la vista:', `${tune.volley_dmg} daño a enemigos.`, 'Siempre acierta.'] },
+};
+
+const idx = (x, y) => y * N + x;
+const inb = (x, y) => x >= 0 && y >= 0 && x < N && y < N;
+const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+const manh = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function roomOf(x, y) { return inb(x, y) ? ((x / ROOM) | 0) + ((y / ROOM) | 0) * RW : -1; }
+function hash(x, y) { let h = (x * 374761393 + y * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function hstat(h, s) { return tune[`${h.cls}_${s}`]; }
+function estat(e, s) { return tune[`${e.kind}_${s}`]; }
+
+// ---- State ------------------------------------------------------------------------------
+const setup = { count: 2, classes: ['warrior', 'mage', 'healer', 'archer'], row: 0 };
+const cam = { x: 0, y: 0, zoom: 0.8, tx: 0, ty: 0, follow: true };
+let scene, state, ui = [];
+
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  const n = setup.count, players = CORNER_ROOMS.slice(0, n), rooms = RW * RW;
+  state = {
+    t: 0, score: 0, gained: '', round: 1, phase: 'hero', active: 0, mode: null,
+    tiles: new Array(N * N).fill(T_WALL), objs: new Array(N * N).fill(null), doorAt: new Int16Array(N * N).fill(-1),
+    rooms: [], doors: [], torches: [],
+    revealed: new Array(rooms).fill(false), revealT: new Array(rooms).fill(-99), revealFrom: new Array(rooms).fill(null),
+    heroes: [], enemies: [], log: [], pops: [], fx: [], dice: null, slam: [], taunt: null, undo: null,
+    enemyQueue: [], enemyTimer: 0, autoEnd: 0, lock: 0, endTimer: 0, won: false, lost: false,
+    banner: null, shake: 0, acting: null, players: n,
+  };
+  buildDungeon(players);
+  for (let i = 0; i < n; i++) { // each hero in the outer corner of their room
+    const r = CORNER_ROOMS[i], R = state.rooms[r], cls = setup.classes[i], hp = tune[cls + '_hp'];
+    const x = R.rc * ROOM + (R.rc === 0 ? 2 : ROOM - 3), y = R.rr * ROOM + (R.rr === 0 ? 2 : ROOM - 3);
+    state.heroes.push({ id: 'h' + i, hero: true, player: i, cls, kind: cls, x, y, hp, maxHp: hp,
+      ap: 0, cds: [0, 0], shield: 0, downed: false, tonics: 0, miss: 0, flash: 0, anim: null, face: 1,
+      stats: { dmg: 0, kills: 0, help: 0 } });
+    state.revealed[r] = true;
+  }
+  populate(players);
+  for (const e of state.enemies) if (state.revealed[e.room]) e.state = 'patrol';
+  cam.zoom = tune.zoom_start;
+  startHeroTurn(0, true);
+  log('Objetivo: derrota a El Carcelero en la sala central.');
+}
+function buildDungeon(players) {
+  const ordinary = tplOf('room'), start = tplOf('start')[0] || ordinary[0], bossT = tplOf('boss')[0] || ordinary[0];
+  for (let r = 0; r < RW * RW; r++) {
+    const tpl = r === BOSS_ROOM ? bossT : players.includes(r) ? start : ordinary[Math.floor(rng() * ordinary.length)];
+    const R = { tpl, rc: r % RW, rr: (r / RW) | 0, variant: Math.floor(rng() * 997) };
+    state.rooms.push(R);
+    const m = TEMPLATES[tpl].map;
+    for (let ly = 0; ly < ROOM; ly++) for (let lx = 0; lx < ROOM; lx++) {
+      const x = R.rc * ROOM + lx, y = R.rr * ROOM + ly, ch = m[ly][lx], i = idx(x, y);
+      state.tiles[i] = ch === '.' || ch === 'o' ? T_FLOOR : T_WALL;
+      if (ch === 'o') state.objs[i] = 'pillar';
+      if (ch === 't') { // its light comes from the side that faces the floor
+        const [dx, dy] = torchFacing(m, lx, ly);
+        state.torches.push({ x, y, room: r, dx, dy, lx: x + dx * 0.6, ly: y + dy * 0.6 });
+      }
+    }
+  }
+  // Which neighbours connect: a random maze that joins every room, then a few extra doors.
+  const edges = [];
+  for (let r = 0; r < RW * RW; r++) {
+    if (r % RW < RW - 1) edges.push([r, r + 1]);
+    if (((r / RW) | 0) < RW - 1) edges.push([r, r + RW]);
+  }
+  for (let i = edges.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [edges[i], edges[j]] = [edges[j], edges[i]]; }
+  const parent = [...Array(RW * RW).keys()];
+  const find = a => parent[a] === a ? a : (parent[a] = find(parent[a]));
+  for (const [a, b] of edges) {
+    const joins = find(a) !== find(b);
+    if (joins) parent[find(a)] = find(b);
+    if (joins || rng() * 100 < tune.extra_door_chance) addDoor(a, b);
+  }
+}
+function torchFacing(m, lx, ly) {
+  for (const [dx, dy] of DIR4) { const c = m[ly + dy] && m[ly + dy][lx + dx]; if (c === '.' || c === 'o') return [dx, dy]; }
+  return [0, 0];
+}
+function addDoor(a, b) { // a 2x2 doorway across both rooms' walls, cells 5-6 of the shared side
+  const A = state.rooms[a], side = b === a + 1;
+  const d = { rooms: [a, b], open: false, orient: side ? 'v' : 'h', tiles: [],
+    x0: side ? A.rc * ROOM + ROOM - 1 : A.rc * ROOM + DOORWAY[0],
+    y0: side ? A.rr * ROOM + DOORWAY[0] : A.rr * ROOM + ROOM - 1 };
+  for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+    const x = d.x0 + dx, y = d.y0 + dy, i = idx(x, y);
+    d.tiles.push({ x, y }); state.tiles[i] = T_DOOR; state.doorAt[i] = state.doors.length;
+  }
+  state.doors.push(d);
+}
+function freeCell(r) { // a random empty floor cell of a room, off the cells inside its doorways
+  const R = state.rooms[r], cells = [];
+  for (let ly = 1; ly < ROOM - 1; ly++) for (let lx = 1; lx < ROOM - 1; lx++) {
+    if ((DOORWAY.includes(lx) && (ly === 1 || ly === ROOM - 2)) || (DOORWAY.includes(ly) && (lx === 1 || lx === ROOM - 2))) continue;
+    const x = R.rc * ROOM + lx, y = R.rr * ROOM + ly, i = idx(x, y);
+    if (state.tiles[i] === T_FLOOR && !state.objs[i] && !unitAt(x, y)) cells.push([x, y]);
+  }
+  return cells.length ? cells[Math.floor(rng() * cells.length)] : null;
+}
+function pickKind() {
+  const w = [['skeleton', tune.spawn_skeleton], ['goblin', tune.spawn_goblin], ['rat', tune.spawn_rat]];
+  let k = rng() * w.reduce((s, [, v]) => s + v, 0);
+  for (const [kind, v] of w) { k -= v; if (k < 0) return kind; }
+  return 'skeleton';
+}
+function populate(players) {
+  const many = setup.count >= tune.extra_enemies_from;
+  for (let r = 0; r < RW * RW; r++) {
+    if (players.includes(r)) continue;
+    const R = state.rooms[r];
+    if (r === BOSS_ROOM) {
+      const bx = R.rc * ROOM + 6, by = R.rr * ROOM + 6;
+      addEnemy('boss', bx, by, bx, by);
+      const escorts = tune.boss_escorts + (many ? 1 : 0);
+      for (let k = 0; k < escorts; k++) { const c = freeCell(r); if (c) addEnemy(k % 2 ? 'goblin' : 'skeleton', c[0], c[1], c[0], c[1]); }
+      continue;
+    }
+    const lo = Math.min(tune.room_enemies_min, tune.room_enemies_max), hi = Math.max(tune.room_enemies_min, tune.room_enemies_max);
+    let count = lo + Math.floor(rng() * (hi - lo + 1));
+    if (many && rng() * 100 < tune.extra_enemy_chance) count++;
+    for (let k = 0; k < count; k++) {
+      const c = freeCell(r); if (!c) break;
+      addEnemy(pickKind(), c[0], c[1], c[0], c[1]);
+      const w = freeCell(r); if (w) state.enemies[state.enemies.length - 1].wp[1] = w;
+    }
+    if (rng() * 100 < tune.chest_chance) { const c = freeCell(r); if (c) state.objs[idx(c[0], c[1])] = 'chest'; }
+  }
+}
+function addEnemy(kind, x, y, wx, wy) {
+  const hp = kind === 'boss' ? tune.boss_hp + tune.boss_hp_per_hero * setup.count : tune[kind + '_hp'];
+  state.enemies.push({ id: 'e' + state.enemies.length, hero: false, kind, x, y, hp, maxHp: hp, alive: true,
+    state: 'dormant', wp: [[x, y], [wx, wy]], wpi: 1, last: null, room: roomOf(x, y), flash: 0, anim: null,
+    face: -1, hurtBy: {} });
+}
+const activeHero = () => state.heroes[state.active];
+const boss = () => state.enemies.find(e => e.kind === 'boss');
+const awake = e => e.alive && e.state !== 'dormant';
+function log(s) { state.log.push(s); if (state.log.length > 6) state.log.shift(); events.push({ type: 'log', text: s }); }
+function pop(x, y, txt, color, delay = 0) { state.pops.push({ x, y, txt, color, t: -delay, life: 1.2 }); }
+function unitAt(x, y) {
+  for (const h of state.heroes) if (h.x === x && h.y === y) return h;
+  for (const e of state.enemies) if (e.alive && e.x === x && e.y === y) return e;
+  return null;
+}
+function passable(x, y) {
+  if (!inb(x, y)) return false;
+  const t = state.tiles[idx(x, y)];
+  return (t === T_FLOOR || t === T_OPEN) && !state.objs[idx(x, y)];
+}
+const opaque = (x, y) => { const t = state.tiles[idx(x, y)]; return t === T_WALL || t === T_DOOR; };
+function lineTiles(a, b) { // Bresenham, both ends included
+  const out = []; let x0 = a.x, y0 = a.y; const x1 = b.x, y1 = b.y;
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    out.push([x0, y0]); if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err; if (e2 >= dy) { err += dy; x0 += sx; } if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+  return out;
+}
+function los(a, b) {
+  const pts = lineTiles(a, b);
+  for (let i = 1; i < pts.length - 1; i++) if (opaque(pts[i][0], pts[i][1])) return false;
+  return true;
+}
+function coverCount(a, t) { // obstacles on the line, or beside the target on the attacker's side
+  if (cheb(a, t) <= 1) return 0;
+  const seen = new Set();
+  const pts = lineTiles(a, t);
+  for (let i = 1; i < pts.length - 1; i++) if (state.objs[idx(pts[i][0], pts[i][1])]) seen.add(idx(pts[i][0], pts[i][1]));
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const x = t.x + dx, y = t.y + dy;
+    if ((dx || dy) && inb(x, y) && state.objs[idx(x, y)] && dx * (a.x - t.x) + dy * (a.y - t.y) > 0 &&
+      cheb(a, { x, y }) < cheb(a, t)) seen.add(idx(x, y));
+  }
+  return Math.min(2, seen.size);
+}
+function hitChance(a, t, opts = {}) {
+  let ch = a.hero ? hstat(a, 'hit') : (a.kind === 'boss' ? tune.boss_hit : estat(a, 'hit'));
+  const d = cheb(a, t), parts = [];
+  if (d > 1) {
+    const f = Math.max(0, d - tune.falloff_start) * tune.falloff_per_tile;
+    if (f) { ch -= f; parts.push(`distancia −${f}%`); }
+  }
+  const cov = opts.ignoreCover ? 0 : coverCount(a, t);
+  if (cov) { ch -= cov * tune.cover_penalty; parts.push(`cobertura −${cov * tune.cover_penalty}%`); }
+  if (a.hero && a.miss) { ch += a.miss * tune.miss_pity; parts.push(`racha de fallos +${a.miss * tune.miss_pity}%`); }
+  if (opts.bonus) { ch += opts.bonus; parts.push(`puntería +${opts.bonus}%`); }
+  ch = clamp(Math.round(ch / 5) * 5, tune.min_hit, tune.max_hit);
+  return { ch, need: 21 - ch / 5, parts };
+}
+function bfs(sx, sy, max, blockUnits, self) {
+  const dist = new Int16Array(N * N).fill(-1), prev = new Int16Array(N * N).fill(-1);
+  const q = [idx(sx, sy)]; dist[q[0]] = 0;
+  for (let qi = 0; qi < q.length; qi++) {
+    const c = q[qi], cx = c % N, cy = (c / N) | 0;
+    if (dist[c] >= max) continue;
+    for (const [dx, dy] of DIR4) {
+      const nx = cx + dx, ny = cy + dy;
+      if (!inb(nx, ny)) continue;
+      const ni = idx(nx, ny);
+      if (dist[ni] >= 0 || !passable(nx, ny)) continue;
+      if (blockUnits) { const u = unitAt(nx, ny); if (u && u !== self) continue; }
+      dist[ni] = dist[c] + 1; prev[ni] = c; q.push(ni);
+    }
+  }
+  return { dist, prev };
+}
+function pathFrom(b, i) {
+  const out = [];
+  for (let c = i; c >= 0; c = b.dist[c] > 0 ? b.prev[c] : -1) out.push([c % N, (c / N) | 0]);
+  return out.reverse();
+}
+function heroReach(h) { return bfs(h.x, h.y, hstat(h, 'move'), true, h); }
+
+// ---- Fog and rooms ------------------------------------------------------------------------
+function revealRoom(r, from) {
+  if (r < 0 || state.revealed[r]) return;
+  state.revealed[r] = true; state.revealT[r] = state.t; state.revealFrom[r] = from;
+  let woke = 0;
+  for (const e of state.enemies) if (e.alive && e.room === r && e.state === 'dormant') { e.state = 'patrol'; woke++; }
+  log(r === BOSS_ROOM ? '¡La sala del Carcelero! No saldrá de ella.' :
+    `Se abre ${TEMPLATES[state.rooms[r].tpl].name}${woke ? `: ${woke} enemigo${woke > 1 ? 's' : ''}` : ''}.`);
+  events.push({ type: 'reveal', room: r });
+}
+const doorSeen = d => d.rooms.some(r => state.revealed[r]);
+function tileSeen(x, y) {
+  if (!inb(x, y)) return false;
+  if (state.revealed[roomOf(x, y)]) return true;
+  const d = state.doorAt[idx(x, y)];
+  return d >= 0 && doorSeen(state.doors[d]);
+}
+function fogAlpha(x, y) {
+  const r = roomOf(x, y);
+  if (r < 0) return 1;
+  if (!state.revealed[r]) return tileSeen(x, y) ? 0 : 1;
+  const f = state.revealFrom[r];
+  const delay = f ? Math.hypot(x - f.x, y - f.y) * 0.045 : 0;
+  return 1 - clamp((state.t - state.revealT[r] - delay) / 0.4, 0, 1);
+}
+
+// ---- Turns ------------------------------------------------------------------------------
+function startHeroTurn(i, snap) {
+  state.phase = 'hero'; state.active = i; state.mode = null; state.undo = null; state.autoEnd = 0;
+  const h = state.heroes[i];
+  h.ap = tune.ap_per_turn;
+  h.cds = h.cds.map(c => Math.max(0, c - 1));
+  state.banner = { text: `Jugador ${h.player + 1} · ${CLASS_INFO[h.cls].name}`, t: 0, color: PLAYER_COLORS[h.player] };
+  camTo(h.x, h.y, snap);
+  events.push({ type: 'turn', hero: h.id, round: state.round });
+}
+function endHeroTurn() {
+  state.mode = null; state.undo = null;
+  for (let i = state.active + 1; i < state.heroes.length; i++) if (!state.heroes[i].downed) { startHeroTurn(i); return; }
+  startEnemyPhase();
+}
+function startEnemyPhase() {
+  state.phase = 'enemy'; state.mode = null; state.undo = null;
+  const near = e => Math.min(...state.heroes.map(h => h.downed ? 99 : cheb(e, h)));
+  const list = state.enemies.filter(awake).sort((a, b) => (a.kind === 'boss') - (b.kind === 'boss') || near(a) - near(b));
+  state.enemyQueue = list.map(e => e.id);
+  state.enemyTimer = 0.4;
+  state.banner = { text: 'Turno de los enemigos', t: 0, color: '#d8645a' };
+}
+function enemyPhase(dt) {
+  const fast = down.has('Space') || down.has('KeyF');
+  state.enemyTimer -= dt * (fast ? tune.fast_forward : 1);
+  if (state.enemyTimer > 0) return;
+  if (state.enemyQueue.length) {
+    const id = state.enemyQueue.shift(), e = state.enemies.find(u => u.id === id);
+    state.enemyTimer = e && e.alive ? actEnemy(e) : 0;
+    checkLoss();
+  } else endEnemyPhase();
+}
+function endEnemyPhase() {
+  for (const h of state.heroes) h.shield = 0;
+  state.taunt = null; state.acting = null;
+  markSlam();
+  state.round++;
+  const first = state.heroes.findIndex(h => !h.downed);
+  if (first >= 0) startHeroTurn(first);
+}
+function checkLoss() {
+  if (state.lost || state.won) return;
+  if (state.heroes.every(h => h.downed)) {
+    state.lost = true; state.endTimer = 1.6; state.gained = 'Todos los héroes han caído';
+    sfx('lose'); events.push({ type: 'lost' });
+  }
+}
+
+// ---- Hero actions -----------------------------------------------------------------------
+function face(u, t) { if (t.x !== u.x) u.face = t.x > u.x ? 1 : -1; }
+function moveHero(h, path) {
+  state.undo = { hero: h.id, x: h.x, y: h.y, ap: h.ap };
+  const end = path[path.length - 1];
+  face(h, { x: end[0], y: end[1] });
+  h.anim = { path, t: 0 }; h.x = end[0]; h.y = end[1]; h.ap -= 1;
+  sfx('step'); events.push({ type: 'move', hero: h.id, to: end });
+}
+function undoMove() {
+  const h = activeHero(), u = state.undo;
+  if (!u || u.hero !== h.id || h.anim) return;
+  h.x = u.x; h.y = u.y; h.ap = u.ap; state.undo = null; pop(h.x, h.y, 'Deshecho', '#cfe3ff');
+}
+function spend(h, n) { h.ap -= n; state.undo = null; }
+const doorNear = (h, d) => d.tiles.some(t => manh(h, t) === 1);
+function openDoor(h, d) { // the whole 2x2 doorway opens, and the rooms on both sides show
+  spend(h, 1); d.open = true;
+  for (const t of d.tiles) state.tiles[idx(t.x, t.y)] = T_OPEN;
+  const c = { x: d.x0 + 0.5, y: d.y0 + 0.5 };
+  for (const r of d.rooms) revealRoom(r, c);
+  face(h, c); sfx('door'); state.lock = 0.35;
+}
+function openChest(h, t) {
+  spend(h, 1); state.objs[idx(t.x, t.y)] = 'chestOpen'; h.tonics++;
+  pop(t.x, t.y, '+1 Tónico', '#9fe7a8'); log(`J${h.player + 1} encuentra un Tónico.`);
+  face(h, t); sfx('chest'); state.lock = 0.3;
+}
+function canAttack(h, e) {
+  return awake(e) && cheb(h, e) <= hstat(h, 'range') && los(h, e);
+}
+function rollD20() { return 1 + Math.floor(rng() * 20); }
+function attack(h, e, opts = {}) {
+  if (!opts.free) spend(h, 1); else state.undo = null;
+  const c = hitChance(h, e, opts), roll = rollD20(), hitIt = roll >= c.need, crit = hitIt && roll >= tune.crit_on;
+  state.dice = { x: e.x, y: e.y, roll, need: c.need, hit: hitIt, crit, t: 0, who: 'hero' };
+  face(h, e); sfx('dice');
+  if (cheb(h, e) > 1) state.fx.push({ kind: h.cls === 'mage' ? 'bolt' : 'arrow', a: { x: h.x, y: h.y }, b: { x: e.x, y: e.y }, t: 0, life: 0.3 });
+  if (hitIt) {
+    h.miss = 0;
+    let dmg = hstat(h, 'dmg') + (opts.bonusDmg || 0);
+    if (crit) dmg *= 2;
+    damage(e, dmg, h, 0.3);
+    if (crit) pop(e.x, e.y, '¡Crítico!', '#ffd34a', 0.3);
+    sfx(crit ? 'crit' : 'hit');
+  } else {
+    h.miss++; pop(e.x, e.y, 'Fallo', '#c8c8d8', 0.3); sfx('miss');
+  }
+  state.lock = 0.55;
+  events.push({ type: 'attack', by: h.id, on: e.id, roll, need: c.need, hit: hitIt });
+}
+function damage(u, dmg, src, delay = 0) {
+  if (u.hero) {
+    if (u.downed) return;
+    if (u.shield > 0) { const a = Math.min(u.shield, dmg); u.shield -= a; dmg -= a; if (a) pop(u.x, u.y, `Escudo −${a}`, '#9fd0ff', delay); }
+    if (dmg <= 0) return;
+    u.hp -= dmg; u.flash = 0.25; pop(u.x, u.y, `−${dmg}`, '#ff7a6a', delay);
+    if (u.hp <= 0) {
+      u.hp = 0; u.downed = true; u.anim = null;
+      pop(u.x, u.y, 'Derribado', '#ff4a4a', delay + 0.3);
+      log(`J${u.player + 1} (${CLASS_INFO[u.cls].name}) ha caído. ¡Un Tónico lo levanta!`);
+      sfx('down'); events.push({ type: 'downed', hero: u.id });
+    }
+    return;
+  }
+  if (!u.alive) return;
+  u.hp -= dmg; u.flash = 0.25; pop(u.x, u.y, `−${dmg}`, '#ffd08a', delay);
+  if (src && src.hero) { src.stats.dmg += dmg; u.hurtBy[src.id] = true; }
+  if (u.hp <= 0) {
+    u.hp = 0; u.alive = false; state.score++;
+    for (const id of Object.keys(u.hurtBy)) { const h = state.heroes.find(x => x.id === id); if (h) h.stats.kills++; }
+    events.push({ type: 'kill', enemy: u.id, kind: u.kind });
+    if (u.kind === 'boss') {
+      state.won = true; state.endTimer = 2.0;
+      state.gained = `¡El Carcelero ha caído en la ronda ${state.round}!`;
+      log(state.gained); sfx('win'); state.shake = 0.5;
+    } else log(`${ENEMY_NAMES[u.kind]} derrotado.`);
+  }
+}
+function cardsOf(h) { return CLASS_INFO[h.cls].cards; }
+function pickCard(i) {
+  const h = activeHero(), id = cardsOf(h)[i], card = CARDS[id];
+  if (state.mode && state.mode.card === i) { state.mode = null; return; }
+  if (h.cds[i] > 0) { pop(h.x, h.y, `Recarga: ${h.cds[i]}`, '#c8c8d8'); return; }
+  if (h.ap < tune[id + '_cost']) { pop(h.x, h.y, 'Faltan PA', '#c8c8d8'); return; }
+  if (card.target === 'self') { cast(h, i, h); return; }
+  state.mode = { card: i };
+}
+function toggleTonic() {
+  const h = activeHero();
+  if (state.mode && state.mode.tonic) { state.mode = null; return; }
+  if (!h.tonics) { pop(h.x, h.y, 'Sin tónicos: ábrelos en cofres', '#c8c8d8'); return; }
+  if (h.ap < 1) { pop(h.x, h.y, 'Faltan PA', '#c8c8d8'); return; }
+  state.mode = { tonic: true };
+}
+function modeTargets(h, mode) { // the tiles a card or the tonic can be used on
+  const out = [];
+  if (mode.tonic) {
+    if (h.hp < h.maxHp) out.push({ x: h.x, y: h.y });
+    for (const o of state.heroes) if (o.downed && cheb(o, h) === 1) out.push({ x: o.x, y: o.y });
+    return out;
+  }
+  const id = cardsOf(h)[mode.card], card = CARDS[id];
+  const range = card.range ? tune[card.range] : 0;
+  if (card.target === 'enemyAdj') { for (const e of state.enemies) if (awake(e) && cheb(h, e) === 1 && los(h, e)) out.push({ x: e.x, y: e.y }); }
+  else if (card.target === 'enemy') { for (const e of state.enemies) if (canAttack(h, e)) out.push({ x: e.x, y: e.y }); }
+  else if (card.target === 'ally') { for (const o of state.heroes) if (!o.downed && cheb(o, h) <= range) out.push({ x: o.x, y: o.y }); }
+  else {
+    for (let y = h.y - range; y <= h.y + range; y++) for (let x = h.x - range; x <= h.x + range; x++) {
+      if (!inb(x, y) || !tileSeen(x, y)) continue;
+      const t = state.tiles[idx(x, y)];
+      if (t !== T_FLOOR && t !== T_OPEN) continue;
+      if (!los(h, { x, y })) continue;
+      if (card.target === 'tile' && (!passable(x, y) || unitAt(x, y))) continue;
+      out.push({ x, y });
+    }
+  }
+  return out;
+}
+function useMode(h, t) {
+  const ok = modeTargets(h, state.mode).some(p => p.x === t.x && p.y === t.y);
+  if (!ok) { state.mode = null; return; }
+  if (state.mode.tonic) {
+    spend(h, 1); h.tonics--; state.mode = null;
+    const o = state.heroes.find(u => u.x === t.x && u.y === t.y);
+    if (o && o.downed) {
+      o.downed = false; o.hp = Math.max(1, Math.ceil(o.maxHp * tune.tonic_revive_hp / 100));
+      h.stats.help++; pop(o.x, o.y, '¡En pie!', '#9fe7a8'); log(`J${h.player + 1} levanta a J${o.player + 1}.`);
+      events.push({ type: 'revive', by: h.id, hero: o.id });
+    } else {
+      const a = Math.min(tune.tonic_heal, h.maxHp - h.hp); h.hp += a; pop(h.x, h.y, `+${a}`, '#9fe7a8');
+    }
+    state.fx.push({ kind: 'heal', a: t, b: t, t: 0, life: 0.6 }); sfx('heal'); state.lock = 0.4;
+    return;
+  }
+  cast(h, state.mode.card, t);
+}
+function cast(h, i, t) {
+  const id = cardsOf(h)[i];
+  spend(h, tune[id + '_cost']); h.cds[i] = tune[id + '_cd']; state.mode = null;
+  const target = unitAt(t.x, t.y);
+  sfx('card'); state.lock = 0.45; face(h, t);
+  events.push({ type: 'card', hero: h.id, card: id });
+  log(`J${h.player + 1} usa ${CARDS[id].name}.`);
+  switch (id) {
+    case 'charge': {
+      const e = target; let dmg = tune.charge_dmg;
+      if (e.kind !== 'boss') {
+        const dx = Math.sign(e.x - h.x), dy = Math.sign(e.y - h.y), path = [[e.x, e.y]];
+        let crashed = null;
+        for (let s = 0; s < tune.charge_push; s++) {
+          const nx = e.x + dx, ny = e.y + dy, other = unitAt(nx, ny);
+          if (!passable(nx, ny) || other) { crashed = other || 'wall'; break; }
+          e.x = nx; e.y = ny; path.push([nx, ny]);
+        }
+        if (path.length > 1) e.anim = { path, t: 0, speed: 12 };
+        if (crashed) {
+          dmg += tune.charge_crash; pop(e.x, e.y, '¡Choque!', '#ffb36a', 0.2);
+          if (crashed !== 'wall' && !crashed.hero) damage(crashed, tune.charge_crash_other, h, 0.25);
+        }
+      }
+      damage(e, dmg, h, 0.2); sfx('hit');
+      break;
+    }
+    case 'shout':
+      h.shield += tune.shout_shield; state.taunt = { hero: h.id };
+      pop(h.x, h.y, `¡A mí! Escudo ${tune.shout_shield}`, '#9fd0ff'); state.fx.push({ kind: 'ring', a: h, b: h, t: 0, life: 0.6 });
+      break;
+    case 'fireball': case 'volley': {
+      const dmg = id === 'fireball' ? tune.fireball_dmg : tune.volley_dmg;
+      state.fx.push({ kind: id === 'fireball' ? 'bolt' : 'arrow', a: { x: h.x, y: h.y }, b: { x: t.x, y: t.y }, t: 0, life: 0.3 });
+      state.fx.push({ kind: id === 'fireball' ? 'boom' : 'rain', a: t, b: t, t: -0.25, life: 0.7 });
+      for (const e of state.enemies.slice()) if (awake(e) && cheb(e, t) <= 1) damage(e, dmg, h, 0.3);
+      if (id === 'fireball') { sfx('fire'); state.shake = 0.2; }
+      break;
+    }
+    case 'blink':
+      state.fx.push({ kind: 'spark', a: { x: h.x, y: h.y }, b: { x: h.x, y: h.y }, t: 0, life: 0.5 });
+      h.x = t.x; h.y = t.y; h.anim = null;
+      state.fx.push({ kind: 'spark', a: t, b: t, t: 0, life: 0.5 });
+      break;
+    case 'heal': {
+      const a = Math.min(tune.heal_amount, target.maxHp - target.hp); target.hp += a;
+      if (target !== h) h.stats.help++;
+      pop(t.x, t.y, `+${a}`, '#9fe7a8'); state.fx.push({ kind: 'heal', a: t, b: t, t: 0, life: 0.6 }); sfx('heal');
+      break;
+    }
+    case 'ward':
+      target.shield += tune.ward_shield; if (target !== h) h.stats.help++;
+      pop(t.x, t.y, `Escudo ${tune.ward_shield}`, '#9fd0ff'); state.fx.push({ kind: 'ring', a: t, b: t, t: 0, life: 0.6 });
+      break;
+    case 'aimed':
+      attack(h, target, { ignoreCover: true, bonus: tune.aimed_bonus_hit, bonusDmg: tune.aimed_bonus_dmg, free: true });
+      break;
+  }
+}
+
+// ---- Enemies ----------------------------------------------------------------------------
+function enemySees(e, h) { return cheb(e, h) <= (e.kind === 'boss' ? tune.boss_sight : tune.enemy_sight) && los(e, h); }
+function chooseTarget(e) {
+  if (state.taunt) {
+    const w = state.heroes.find(h => h.id === state.taunt.hero);
+    if (w && !w.downed && cheb(e, w) <= tune.shout_radius) return w;
+  }
+  let best = null, bd = 1e9;
+  for (const h of state.heroes) if (!h.downed && enemySees(e, h)) { const d = cheb(e, h); if (d < bd) { bd = d; best = h; } }
+  return best;
+}
+function distField(gx, gy) {
+  const dist = new Int16Array(N * N).fill(-1), q = [idx(gx, gy)]; dist[q[0]] = 0;
+  for (let qi = 0; qi < q.length; qi++) {
+    const c = q[qi], cx = c % N, cy = (c / N) | 0;
+    for (const [dx, dy] of DIR4) {
+      const nx = cx + dx, ny = cy + dy;
+      if (!inb(nx, ny) || !passable(nx, ny)) continue;
+      const ni = idx(nx, ny); if (dist[ni] >= 0) continue;
+      dist[ni] = dist[c] + 1; q.push(ni);
+    }
+  }
+  return dist;
+}
+function planToward(e, goal, move) { // the reachable tile nearest to goal by walking distance
+  const reach = bfs(e.x, e.y, move, true, e), df = distField(goal.x, goal.y);
+  let best = idx(e.x, e.y), bs = df[best] < 0 ? 9999 : df[best] * 10;
+  for (let i = 0; i < N * N; i++) {
+    if (reach.dist[i] < 0 || df[i] < 0) continue;
+    const s = df[i] * 10 + reach.dist[i];
+    if (s < bs) { bs = s; best = i; }
+  }
+  return pathFrom(reach, best);
+}
+function planAttack(e, h, move) {
+  const ranged = e.kind === 'goblin', range = ranged ? tune.goblin_range : 1;
+  const reach = bfs(e.x, e.y, move, true, e);
+  let best = -1, bs = 1e9;
+  for (let i = 0; i < N * N; i++) {
+    if (reach.dist[i] < 0) continue;
+    const p = { x: i % N, y: (i / N) | 0 }, d = cheb(p, h);
+    if (d > range || d < (ranged ? 2 : 1) || !los(p, h)) continue;
+    const s = reach.dist[i] + (ranged ? coverCount(p, h) * 3 + Math.abs(d - 4) * 0.5 : 0);
+    if (s < bs) { bs = s; best = i; }
+  }
+  return best >= 0 ? pathFrom(reach, best) : planToward(e, h, move);
+}
+function canHit(e, h) { return cheb(e, h) <= (e.kind === 'goblin' ? tune.goblin_range : 1) && los(e, h); }
+function enemyAttack(e, h, delay) {
+  const c = hitChance(e, h), roll = rollD20(), hitIt = roll >= c.need;
+  face(e, h);
+  state.dice = { x: h.x, y: h.y, roll, need: c.need, hit: hitIt, crit: false, t: -delay, who: 'enemy' };
+  if (e.kind === 'goblin') state.fx.push({ kind: 'arrow', a: { x: e.x, y: e.y }, b: { x: h.x, y: h.y }, t: -delay, life: 0.3 });
+  const dmg = e.kind === 'boss' ? tune.boss_chain_dmg : estat(e, 'dmg');
+  if (hitIt) damage(h, dmg, e, delay + 0.3); else pop(h.x, h.y, 'Esquiva', '#c8c8d8', delay + 0.3);
+  sfx(hitIt ? 'hit' : 'miss');
+  events.push({ type: 'enemyAttack', by: e.id, on: h.id, roll, need: c.need, hit: hitIt });
+}
+function actEnemy(e) {
+  state.acting = e.id; camTo(e.x, e.y);
+  if (e.kind === 'boss') return bossAct(e);
+  const tgt = chooseTarget(e);
+  if (tgt && e.state !== 'chase') { pop(e.x, e.y, '¡Alerta!', '#ff6a5a'); sfx('alert'); }
+  let path;
+  if (tgt) { e.state = 'chase'; e.last = { x: tgt.x, y: tgt.y }; path = planAttack(e, tgt, estat(e, 'move')); }
+  else if (e.last) {
+    path = planToward(e, e.last, estat(e, 'move'));
+    const end = path[path.length - 1];
+    if (path.length <= 1 || (end[0] === e.last.x && end[1] === e.last.y)) { e.last = null; e.state = 'patrol'; }
+  } else {
+    let w = e.wp[e.wpi];
+    if (e.x === w[0] && e.y === w[1]) { e.wpi ^= 1; w = e.wp[e.wpi]; }
+    path = planToward(e, { x: w[0], y: w[1] }, tune.patrol_move);
+  }
+  let dur = 0.15;
+  if (path && path.length > 1) {
+    const end = path[path.length - 1];
+    face(e, { x: end[0], y: end[1] });
+    e.anim = { path, t: 0 }; e.x = end[0]; e.y = end[1];
+    dur += (path.length - 1) / tune.anim_speed;
+  }
+  if (tgt && !tgt.downed && canHit(e, tgt)) { enemyAttack(e, tgt, dur); dur += 0.6; }
+  else if (!tgt) { const seen = chooseTarget(e); if (seen) { e.state = 'chase'; e.last = { x: seen.x, y: seen.y }; pop(e.x, e.y, '¡Alerta!', '#ff6a5a', dur); } }
+  return dur + tune.enemy_pause;
+}
+function bossAct(e) {
+  let dur = 0.3;
+  if (state.slam.length) {
+    for (const s of state.slam) {
+      state.fx.push({ kind: 'slam', a: s, b: s, t: 0, life: 0.7 });
+      for (const h of state.heroes) if (!h.downed && cheb(h, s) <= 1) damage(h, tune.boss_slam_dmg, e, 0.15);
+    }
+    state.slam = []; state.shake = 0.45; sfx('slam'); dur = 1.0;
+    pop(e.x, e.y, '¡Golpe de cadenas!', '#ff6a5a');
+  }
+  let adj = null;
+  for (const h of state.heroes) if (!h.downed && cheb(h, e) === 1 && (!adj || h.hp < adj.hp)) adj = h;
+  if (adj) { enemyAttack(e, adj, dur * 0.6); dur += 0.6; }
+  return dur + tune.enemy_pause;
+}
+function markSlam() {
+  const b = boss();
+  state.slam = [];
+  if (!b || !awake(b)) return;
+  const cands = state.heroes.filter(h => !h.downed && enemySees(b, h));
+  if (!cands.length) return;
+  const crowd = h => state.heroes.filter(o => !o.downed && cheb(o, h) <= 1).length;
+  cands.sort((p, q) => crowd(q) - crowd(p) || cheb(b, p) - cheb(b, q));
+  const n = b.hp <= b.maxHp * tune.boss_rage_at / 100 ? 2 : 1;
+  for (let i = 0; i < Math.min(n, cands.length); i++) state.slam.push({ x: cands[i].x, y: cands[i].y });
+  if (n === 2 && cands.length === 1) {
+    const h = cands[0], off = { x: h.x + (h.x < b.x ? -2 : 2), y: h.y };
+    state.slam.push(off);
+  }
+  if (state.slam.length) log(`El Carcelero marca ${state.slam.length > 1 ? 'dos zonas' : 'una zona'}: ¡apartaos!`);
+}
+
+// ---- Camera: top-down, a cell is TS world px ---------------------------------------------
+const FEET = TS * 0.3; // a code-drawn figure stands this far below its cell's centre
+function wpos(x, y) { return { x: (x + 0.5) * TS, y: (y + 0.5) * TS }; }
+function camTo(x, y, snap) {
+  const w = wpos(x, y); cam.tx = w.x; cam.ty = w.y; cam.follow = true;
+  if (snap) { cam.x = cam.tx; cam.y = cam.ty; }
+}
+function updateCamera(dt) {
+  const k = tune.cam_pan_speed * dt / cam.zoom;
+  const pan = (codes, dx, dy) => { if (codes.some(c => down.has(c))) { cam.x += dx * k; cam.y += dy * k; cam.follow = false; } };
+  pan(['ArrowLeft', 'KeyA'], -1, 0); pan(['ArrowRight', 'KeyD'], 1, 0);
+  pan(['ArrowUp', 'KeyW'], 0, -1); pan(['ArrowDown', 'KeyS'], 0, 1);
+  if (down.has('KeyQ')) wheel += dt * 4; if (down.has('KeyE')) wheel -= dt * 4;
+  if (wheel) { cam.zoom = clamp(cam.zoom * Math.pow(0.9, wheel), 0.3, 1.6); wheel = 0; }
+  if (pressed('KeyC') && state.phase === 'hero') { const h = activeHero(); camTo(h.x, h.y); }
+  if (cam.follow) { const f = Math.min(1, dt * 6); cam.x += (cam.tx - cam.x) * f; cam.y += (cam.ty - cam.y) * f; }
+  // the board's edge stops a little inside the screen's, so a corner room clears the HUD
+  const edge = (half) => Math.min(Math.max(0, half - 240 / cam.zoom), N * TS / 2);
+  cam.x = clamp(cam.x, edge(W / 2 / cam.zoom), N * TS - edge(W / 2 / cam.zoom));
+  cam.y = clamp(cam.y, edge(H / 2 / cam.zoom), N * TS - edge(H / 2 / cam.zoom));
+}
+function toWorld(px, py) { return { x: (px - W / 2) / cam.zoom + cam.x, y: (py - H / 2) / cam.zoom + cam.y }; }
+function screenToTile(px, py) { const w = toWorld(px, py); return { x: Math.floor(w.x / TS), y: Math.floor(w.y / TS) }; }
+function toScreen(wx, wy) { return { x: (wx - cam.x) * cam.zoom + W / 2, y: (wy - cam.y) * cam.zoom + H / 2 }; }
+function dispPos(u) { // where a figure is drawn, part way along its move
+  if (!u.anim) return { x: u.x, y: u.y };
+  const p = u.anim.path, f = Math.max(0, u.anim.t) * (u.anim.speed || tune.anim_speed);
+  const i = Math.min(p.length - 1, Math.floor(f)), j = Math.min(p.length - 1, i + 1), k = f - Math.floor(f);
+  return { x: p[i][0] + (p[j][0] - p[i][0]) * k, y: p[i][1] + (p[j][1] - p[i][1]) * k };
+}
+const FIG_H = { warrior: 58, mage: 62, healer: 54, archer: 50, skeleton: 46, goblin: 36, rat: 20, boss: 82 };
+function unitVisible(u) { return u.hero || (awake(u) && fogAlpha(u.x, u.y) < 0.5); }
+function unitBox(u) { // what a click on a figure hits, in world px: its own cell, plus a painted figure's size
+  const d = dispPos(u), c = wpos(d.x, d.y), big = u.kind === 'boss';
+  const s = artImage('units', u.kind) ? (big ? 2.2 : 1.2) * TS / 2 : (big ? 0.75 : 0.5) * TS;
+  return { x0: c.x - s, x1: c.x + s, y0: c.y - s, y1: c.y + Math.max(s, FEET + 8), y: d.y };
+}
+function unitAtScreen(px, py) {
+  const w = toWorld(px, py);
+  let best = null, bd = -1e9;
+  for (const u of [...state.heroes, ...state.enemies]) {
+    if (!u.hero && !u.alive) continue;
+    if (!unitVisible(u)) continue;
+    const b = unitBox(u);
+    if (w.x >= b.x0 && w.x <= b.x1 && w.y >= b.y0 && w.y <= b.y1 && b.y > bd) { bd = b.y; best = u; }
+  }
+  return best;
+}
+
+// ---- Play update ------------------------------------------------------------------------
+function busy() { return state.lock > 0 || state.heroes.some(h => h.anim) || state.enemies.some(e => e.anim); }
+function updateAnims(dt) {
+  const fast = state.phase === 'enemy' && (down.has('Space') || down.has('KeyF'));
+  const d = dt * (fast ? tune.fast_forward : 1);
+  for (const u of [...state.heroes, ...state.enemies]) {
+    if (u.anim) { u.anim.t += d; if (u.anim.t * (u.anim.speed || tune.anim_speed) >= u.anim.path.length - 1) u.anim = null; }
+    if (u.flash > 0) u.flash -= dt;
+  }
+  for (const p of state.pops) p.t += d;
+  state.pops = state.pops.filter(p => p.t < p.life);
+  for (const f of state.fx) f.t += d;
+  state.fx = state.fx.filter(f => f.t < f.life);
+  if (state.dice) { state.dice.t += d; if (state.dice.t > 1.3) state.dice = null; }
+  if (state.lock > 0) state.lock -= dt;
+  if (state.shake > 0) state.shake -= dt;
+  if (state.banner) { state.banner.t += dt; if (state.banner.t > 1.8) state.banner = null; }
+}
+function heroPhase() {
+  const h = activeHero();
+  if (pressed('Escape')) state.mode = null;
+  for (const c of clicks) {
+    if (c.button === 2) { state.mode = null; continue; }
+    const u = uiHit(c.x, c.y);
+    if (u) { if (!busy()) u.act(); continue; }
+    if (busy()) continue;
+    boardClick(h, c.x, c.y);
+    if (state.phase !== 'hero') return;
+  }
+  if (busy()) return;
+  if (pressed('Space')) { endHeroTurn(); return; }
+  if (pressed('KeyZ')) undoMove();
+  if (pressed('KeyT')) toggleTonic();
+  if (pressed('Digit1')) pickCard(0);
+  if (pressed('Digit2')) pickCard(1);
+  if (activeHero().ap <= 0 && !state.mode) {
+    state.autoEnd += STEP;
+    if (state.autoEnd > 0.4) endHeroTurn();
+  } else state.autoEnd = 0;
+}
+function boardClick(h, px, py) {
+  const u = unitAtScreen(px, py);
+  const t = u ? { x: u.x, y: u.y } : screenToTile(px, py);
+  if (!inb(t.x, t.y)) return;
+  if (state.mode) { useMode(h, t); return; }
+  if (h.ap < 1) { pop(h.x, h.y, 'Sin PA: Espacio para pasar', '#c8c8d8'); return; }
+  if (u && !u.hero) {
+    if (canAttack(h, u)) attack(h, u);
+    else pop(u.x, u.y, los(h, u) ? 'Fuera de alcance' : 'Sin línea de visión', '#c8c8d8');
+    return;
+  }
+  const tile = state.tiles[idx(t.x, t.y)];
+  if (tile === T_DOOR) {
+    const d = state.doors[state.doorAt[idx(t.x, t.y)]];
+    if (doorNear(h, d)) openDoor(h, d); else pop(h.x, h.y, 'Ponte al lado de la puerta', '#c8c8d8');
+    return;
+  }
+  if (state.objs[idx(t.x, t.y)] === 'chest' && cheb(h, t) === 1) { openChest(h, t); return; }
+  const r = heroReach(h), i = idx(t.x, t.y);
+  if (r.dist[i] > 0) moveHero(h, pathFrom(r, i));
+}
+function uiHit(x, y) { for (let i = ui.length - 1; i >= 0; i--) { const b = ui[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b; } return null; }
+
+// ---- Drawing: figures ---------------------------------------------------------------------
+const INK = '#0c0a12';
+function P(pts, fill, lw = 2) {
+  ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+  ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.stroke(); }
+}
+function C(x, y, r, fill, lw = 2) {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
+  if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.stroke(); }
+}
+function El(x, y, rx, ry, fill, lw = 2) {
+  ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
+  if (lw) { ctx.lineWidth = lw; ctx.strokeStyle = INK; ctx.stroke(); }
+}
+function Ln(x1, y1, x2, y2, color, w) {
+  ctx.lineCap = 'round';
+  for (const [c, lw] of [[INK, w + 2.5], [color, w]]) {
+    ctx.strokeStyle = c; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+}
+function Arc(x, y, r, a0, a1, color, w) {
+  ctx.lineCap = 'round';
+  for (const [c, lw] of [[INK, w + 2.5], [color, w]]) { ctx.strokeStyle = c; ctx.lineWidth = lw; ctx.beginPath(); ctx.arc(x, y, r, a0, a1); ctx.stroke(); }
+}
+function glow(x, y, r, color) {
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, color); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+const FIGS = {
+  warrior() {
+    P([-9, -31, 9, -31, 13, -3, -12, -3], '#8e2a24');
+    P([-8, -13, -2, -13, -2, 0, -9, 0], '#3a3f4d'); P([2, -13, 8, -13, 9, 0, 2, 0], '#3a3f4d');
+    P([-11, -31, 11, -31, 9, -12, -9, -12], '#aab3c4');
+    P([-9, -16, 9, -16, 9, -12, -9, -12], '#5a4030', 1.5);
+    El(0, -41, 8, 7, '#c5ccd8'); P([-8, -42, 8, -42, 7, -32, -7, -32], '#c5ccd8');
+    ctx.fillStyle = INK; ctx.fillRect(-6, -39, 12, 2.5);
+    P([-2, -47, 2, -47, 6, -57, 0, -52, -5, -58], '#c0392b', 1.5);
+    Ln(11, -14, 18, -42, '#e3e7ee', 3); Ln(7, -18, 15, -14, '#c9a43a', 2.5);
+    P([-19, -31, -5, -31, -5, -17, -12, -7, -19, -17], '#a8322a');
+    P([-16, -28, -8, -28, -8, -18, -12, -12, -16, -18], '#c0453a', 1);
+    C(-12, -22, 2.3, '#e0b84a', 1);
+  },
+  mage() {
+    P([-7, -30, 7, -30, 13, 0, -13, 0], '#3346a0');
+    P([-13, 0, 13, 0, 12, -4, -12, -4], '#d8b24a', 1.5);
+    P([-2.5, -28, 2.5, -28, 2, -6, -2, -6], '#25307a', 1);
+    C(0, -33, 5, '#e5c49c'); P([-4, -31, 4, -31, 0, -22], '#ececf2', 1.5);
+    El(0, -37, 11, 3.5, '#24307a'); P([-7, -37, 7, -37, 5, -49, 12, -61, 0, -48], '#2a3888');
+    C(3, -45, 1.3, '#f2d36a', 0); C(-1, -40, 1.1, '#f2d36a', 0);
+    Ln(12, 0, 12, -45, '#6b4a2c', 2.5);
+    glow(12, -48, 16, 'rgba(120,220,255,0.55)'); C(12, -48, 4.5, '#8fe8ff', 1.5);
+  },
+  healer() {
+    Ln(-13, 0, -13, -41, '#7a5532', 2.5);
+    P([-13, -41, -19, -48, -13, -46], '#5fbf6a', 1); P([-13, -41, -7, -49, -12, -45], '#5fbf6a', 1);
+    glow(-13, -45, 12, 'rgba(250,230,140,0.45)'); C(-13, -44, 2.5, '#f4e27a', 1);
+    P([-8, -30, 8, -30, 12, 0, -12, 0], '#e6dcc2');
+    P([-2, -30, 2, -30, 2.5, 0, -2.5, 0], '#d4a943', 1);
+    C(0, -35, 7.5, '#d5c7a2'); C(0, -33.5, 4.2, '#e5c49c', 1.5);
+    glow(0, -47, 14, 'rgba(255,220,120,0.35)');
+    ctx.lineWidth = 4.5; ctx.strokeStyle = INK; ctx.beginPath(); ctx.ellipse(0, -47, 8.5, 2.8, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 2.2; ctx.strokeStyle = '#f7d96e'; ctx.stroke();
+  },
+  archer() {
+    P([5, -34, 10, -36, 13, -17, 8, -15], '#7a4e2a', 1.5);
+    Ln(7, -35, 6, -42, '#e8e2d0', 1.2); Ln(9, -36, 9.5, -43, '#e8e2d0', 1.2);
+    P([4, -42, 8, -42, 6, -46], '#c0392b', 1); P([7.5, -43, 11.5, -43, 9.5, -47], '#c0392b', 1);
+    P([-7, -12, -2, -12, -2, 0, -8, 0], '#5a3d24'); P([2, -12, 7, -12, 8, 0, 2, 0], '#5a3d24');
+    P([-9, -31, 9, -31, 9, -10, -9, -10], '#3f7a3a');
+    P([-9, -15, 9, -15, 9, -12, -9, -12], '#6b4a2c', 1);
+    P([-8, -30, 8, -30, 6, -41, 0, -48, -6, -41], '#2f5f2c'); C(0, -34, 3.8, '#c9a27e', 1.2);
+    Arc(-6, -22, 15, Math.PI * 0.6, Math.PI * 1.4, '#8a5a2b', 3);
+    ctx.strokeStyle = '#e8e2d0'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-10.6, -7.7); ctx.lineTo(-10.6, -36.3); ctx.stroke();
+  },
+  skeleton() {
+    Ln(-4, -14, -6, 0, '#ddd6c1', 2.5); Ln(4, -14, 6, 0, '#ddd6c1', 2.5);
+    P([-6, -17, 6, -17, 4, -12, -4, -12], '#ddd6c1', 1.5);
+    Ln(0, -17, 0, -31, '#ddd6c1', 2.5);
+    for (let i = 0; i < 3; i++) Arc(0, -25 + i * 4, 7 - i, Math.PI * 1.1, Math.PI * 1.9, '#ddd6c1', 1.6);
+    Ln(-7, -30, -11, -17, '#ddd6c1', 2); Ln(7, -30, 12, -19, '#ddd6c1', 2);
+    Ln(12, -19, 19, -39, '#9a6a4a', 3); Ln(9, -21, 15, -18, '#5a3a2a', 2);
+    C(0, -37, 6.5, '#e6dfca'); P([-4, -33, 4, -33, 3, -28.5, -3, -28.5], '#e6dfca', 1.5);
+    C(-2.6, -37.5, 1.9, '#1a1014', 0); C(2.6, -37.5, 1.9, '#1a1014', 0);
+    glow(0, -37.5, 9, 'rgba(255,90,60,0.35)');
+    C(-2.6, -37.5, 0.9, '#ff6a3a', 0); C(2.6, -37.5, 0.9, '#ff6a3a', 0);
+  },
+  goblin() {
+    Arc(-8, -14, 10, Math.PI * 0.6, Math.PI * 1.4, '#7a4e2a', 2.5);
+    Ln(-4, -8, -5, 0, '#5f7f2a', 2.5); Ln(4, -8, 5, 0, '#5f7f2a', 2.5);
+    P([-7, -20, 7, -20, 9, -6, 6, -8, 3, -5, 0, -8, -3, -5, -6, -8, -9, -6], '#5b3f5f');
+    P([-6, -28, -20, -33, -6, -22], '#8cbc44'); P([6, -28, 20, -33, 6, -22], '#8cbc44');
+    C(0, -26, 8, '#8cbc44');
+    C(-3, -27.5, 2, '#ffe14a', 1); C(3, -27.5, 2, '#ffe14a', 1);
+    P([-3, -21.5, -1, -21.5, -2, -19], '#f4f0e0', 0.8); P([1, -21.5, 3, -21.5, 2, -19], '#f4f0e0', 0.8);
+  },
+  rat() {
+    ctx.lineCap = 'round';
+    for (const [c, w] of [[INK, 4.5], ['#c29aa8', 2.2]]) {
+      ctx.strokeStyle = c; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(-11, -6); ctx.quadraticCurveTo(-27, -2, -22, -15); ctx.stroke();
+    }
+    Ln(-7, -3, -8, 0, '#5a4a64', 2); Ln(6, -3, 7, 0, '#5a4a64', 2);
+    El(0, -8, 13, 7, '#6e5d7a');
+    P([8, -13, 21, -6, 8, -2], '#7b6a88');
+    C(9, -14, 3.6, '#a48fb3', 1.5);
+    C(15, -8, 1.5, '#ff4a4a', 0); C(21, -6, 1.4, '#e8a0b0', 0);
+  },
+  boss() {
+    for (let i = 0; i < 5; i++) El(22 + i * 2.6, -30 + i * 6, 2.6, 1.8, '#8a8f9a', 1);
+    for (let a = 0; a < 8; a++) { const t = a * Math.PI / 4; P([36 + Math.cos(t) * 6, -2 + Math.sin(t) * 6, 36 + Math.cos(t + 0.3) * 11, -2 + Math.sin(t + 0.3) * 11, 36 + Math.cos(t + 0.6) * 6, -2 + Math.sin(t + 0.6) * 6], '#4b4f58', 1); }
+    C(36, -2, 7.5, '#5b6068');
+    P([-15, -17, -4, -17, -5, 0, -17, 0], '#2b2033'); P([4, -17, 15, -17, 17, 0, 5, 0], '#2b2033');
+    P([-21, -54, 21, -54, 16, -14, -16, -14], '#4a2a5a');
+    P([-17, -48, 17, -48, 14, -36, -14, -36], '#5e3a70', 1.5);
+    P([-16, -21, 16, -21, 16, -15, -16, -15], '#3a2a1e', 1.5);
+    Arc(-8, -11, 4, 0, Math.PI * 2, '#d8b04a', 1.5); Ln(-8, -7, -8, -1, '#d8b04a', 1.5);
+    Ln(-21, -49, -27, -25, '#3c2448', 7); Ln(21, -49, 23, -30, '#3c2448', 7);
+    C(-27, -23, 5, '#3c2448'); C(23, -29, 5, '#3c2448');
+    El(-21, -51, 9, 6.5, '#6a4a7a'); El(21, -51, 9, 6.5, '#6a4a7a');
+    P([-10, -70, 10, -70, 9, -54, -9, -54], '#2e2238');
+    P([-9, -67, -24, -82, -14, -63], '#d8cfb8'); P([9, -67, 24, -82, 14, -63], '#d8cfb8');
+    glow(0, -62, 14, 'rgba(140,255,90,0.5)');
+    C(-3.6, -62, 2.1, '#9dff6a', 0); C(3.6, -62, 2.1, '#9dff6a', 0);
+  },
+};
+function drawFigure(kind, x, y, s = 1, f = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s * f, s); FIGS[kind](); ctx.restore();
+}
+
+// ---- Drawing: painted art, and code-painted stand-ins until it arrives ---------------------
+// art.js lists the painted images. Anything it does not list is painted here by code, once,
+// on the same grid, so the game looks whole before a single image exists.
+const images = {};
+function loadArt() {
+  const add = v => {
+    if (Array.isArray(v)) v.forEach(add);
+    else if (typeof v === 'string' && !(v in images)) {
+      images[v] = null; const im = new Image(); im.onload = () => { images[v] = im; }; im.src = v;
+    }
+  };
+  for (const g of ['rooms', 'doors', 'props', 'units']) for (const k in (ARTS[g] || {})) add(ARTS[g][k]);
+}
+function artImage(group, key, variant = 0) {
+  const v = ARTS[group] && ARTS[group][key];
+  if (!v) return null;
+  return images[Array.isArray(v) ? v[variant % v.length] : v] || null;
+}
+const painted = {};
+function canvasOf(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function rrp(g, x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+function tint(base, k) { const v = base + k; return `rgb(${clamp(v + 5, 0, 255) | 0},${clamp(v - 2, 0, 255) | 0},${clamp(v - 13, 0, 255) | 0})`; }
+function paintStone(g, x, y, w, h, base, sa, sb, r = 6) { // a bevelled block of warm grey stone
+  rrp(g, x, y, w, h, r); g.fillStyle = tint(base, 0); g.fill();
+  g.lineCap = 'round'; g.lineWidth = 2.5;
+  g.strokeStyle = tint(base, 32); g.beginPath(); g.moveTo(x + 3, y + h - r); g.lineTo(x + 3, y + 3); g.lineTo(x + w - r, y + 3); g.stroke();
+  g.strokeStyle = tint(base, -46); g.beginPath(); g.moveTo(x + w - 2.5, y + r); g.lineTo(x + w - 2.5, y + h - 2.5); g.lineTo(x + r, y + h - 2.5); g.stroke();
+  g.globalAlpha = 0.5;
+  for (let i = 0; i < 7; i++) { // grain
+    const a = hash(sa + i * 13, sb), b = hash(sb + i * 7, sa);
+    g.fillStyle = tint(base, (a - 0.5) * 40);
+    g.beginPath(); g.ellipse(x + 6 + a * (w - 12), y + 6 + b * (h - 12), 1.5 + a * 4, 1.2 + b * 3, a * 3, 0, Math.PI * 2); g.fill();
+  }
+  g.globalAlpha = 1;
+  if (hash(sa * 3 + 1, sb * 5 + 2) < 0.22) { // a crack
+    g.strokeStyle = 'rgba(30,22,16,0.8)'; g.lineWidth = 1.3; g.beginPath();
+    let cx = x + w * (0.2 + 0.6 * hash(sa, sb * 2)); g.moveTo(cx, y + 4);
+    for (let s = 1; s <= 4; s++) { cx = clamp(cx + (hash(sa + s, sb) - 0.5) * w * 0.4, x + 4, x + w - 4); g.lineTo(cx, y + 4 + (h - 8) * s / 4); }
+    g.stroke();
+  }
+}
+function paintBone(g, x, y, len, ang) {
+  g.save(); g.translate(x, y); g.rotate(ang); g.lineCap = 'round';
+  for (const [c, w] of [['#2a2218', 7], ['#dcd2b6', 4]]) { g.strokeStyle = c; g.lineWidth = w; g.beginPath(); g.moveTo(-len / 2, 0); g.lineTo(len / 2, 0); g.stroke(); }
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+    g.beginPath(); g.arc(sx * len / 2, sy * 2.4, 3, 0, Math.PI * 2); g.fillStyle = '#dcd2b6'; g.fill();
+    g.lineWidth = 1.2; g.strokeStyle = '#2a2218'; g.stroke();
+  }
+  g.restore();
+}
+function paintSkull(g, x, y, s, ang) {
+  g.save(); g.translate(x, y); g.rotate(ang); g.scale(s, s);
+  g.lineWidth = 1.6; g.strokeStyle = '#2a2218'; g.fillStyle = '#e2d8bc';
+  g.fillRect(-5, 5, 10, 7); g.strokeRect(-5, 5, 10, 7);
+  g.beginPath(); g.ellipse(0, 0, 9, 10, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.fillStyle = '#1c1612';
+  for (const ex of [-3.6, 3.6]) { g.beginPath(); g.ellipse(ex, 0.5, 2.6, 3, 0, 0, Math.PI * 2); g.fill(); }
+  g.beginPath(); g.moveTo(0, 3.5); g.lineTo(-1.4, 6); g.lineTo(1.4, 6); g.fill();
+  g.restore();
+}
+function paintWeb(g, x, y, sx, sy, size) { // a cobweb in a corner, opening toward (sx, sy)
+  g.strokeStyle = 'rgba(235,232,225,0.4)'; g.lineWidth = 1;
+  const spokes = 5, at = (i, f) => { const a = (i / (spokes - 1)) * Math.PI / 2; return [x + sx * Math.cos(a) * size * f, y + sy * Math.sin(a) * size * f]; };
+  for (let i = 0; i < spokes; i++) { g.beginPath(); g.moveTo(x, y); g.lineTo(...at(i, 1)); g.stroke(); }
+  for (const f of [0.3, 0.55, 0.8]) { g.beginPath(); for (let i = 0; i < spokes; i++) i ? g.lineTo(...at(i, f)) : g.moveTo(...at(i, f)); g.stroke(); }
+}
+function paintTorch(g, cx, cy, dx, dy) { // an iron sconce on the wall face, its flame toward the room
+  const fx = cx + dx * TS * 0.36, fy = cy + dy * TS * 0.36, R = TS * 1.7;
+  const gl = g.createRadialGradient(fx, fy, 2, fx, fy, R);
+  gl.addColorStop(0, 'rgba(255,170,70,0.5)'); gl.addColorStop(1, 'rgba(255,120,40,0)');
+  g.save(); g.globalCompositeOperation = 'lighter'; g.fillStyle = gl; g.fillRect(fx - R, fy - R, 2 * R, 2 * R); g.restore();
+  g.lineWidth = 1.5; g.strokeStyle = '#0c0a08';
+  g.beginPath(); g.arc(fx, fy, 7, 0, Math.PI * 2); g.fillStyle = '#2e2622'; g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(fx - 5.5, fy + 2); g.quadraticCurveTo(fx, fy - 20, fx + 5.5, fy + 2); g.closePath(); g.fillStyle = '#ff9a3a'; g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(fx - 2.5, fy + 1); g.quadraticCurveTo(fx, fy - 10, fx + 2.5, fy + 1); g.closePath(); g.fillStyle = '#ffe27a'; g.fill();
+}
+function paintedRoom(id) { // a template painted by code: the stand-in for its painted image
+  const key = 'room:' + id;
+  if (painted[key]) return painted[key];
+  const m = TEMPLATES[id].map, c = canvasOf(ROOM * TS, ROOM * TS), g = c.getContext('2d');
+  const s = id.length * 131 + id.charCodeAt(0) * 7;
+  const at = (x, y) => (x < 0 || y < 0 || x >= ROOM || y >= ROOM) ? '#' : m[y][x];
+  const wall = (x, y) => '#t'.includes(at(x, y));
+  g.fillStyle = '#2b2520'; g.fillRect(0, 0, c.width, c.height);
+  // Floor: flagstones, one or two to a cell, some cracked, a little moss
+  for (let y = 0; y < ROOM; y++) for (let x = 0; x < ROOM; x++) {
+    if (wall(x, y)) continue;
+    const px = x * TS, py = y * TS, h = hash(x + s, y * 3 + s), base = 82 + hash(x * 7 + s, y + s) * 22;
+    if (h < 0.45) paintStone(g, px + 2, py + 2, TS - 4, TS - 4, base, x + s, y);
+    else if (h < 0.72) { paintStone(g, px + 2, py + 2, TS / 2 - 3, TS - 4, base, x + s, y); paintStone(g, px + TS / 2 + 1, py + 2, TS / 2 - 3, TS - 4, base - 8, y + s, x); }
+    else { paintStone(g, px + 2, py + 2, TS - 4, TS / 2 - 3, base, x + s, y); paintStone(g, px + 2, py + TS / 2 + 1, TS - 4, TS / 2 - 3, base + 6, y + s, x + 1); }
+    if (hash(x * 11 + s, y * 5) > 0.9) {
+      g.fillStyle = 'rgba(78,98,52,0.45)';
+      for (let k = 0; k < 4; k++) { g.beginPath(); g.ellipse(px + 8 + hash(k, x + s) * 48, py + 8 + hash(y + s, k) * 48, 4 + k, 3 + k * 0.6, k, 0, Math.PI * 2); g.fill(); }
+    }
+  }
+  // The shadow each wall throws on the floor beside it
+  for (let y = 0; y < ROOM; y++) for (let x = 0; x < ROOM; x++) {
+    if (wall(x, y)) continue;
+    const px = x * TS, py = y * TS, D = 24;
+    for (const [dx, dy, a] of [[0, -1, 0.55], [-1, 0, 0.45], [1, 0, 0.3], [0, 1, 0.25]]) {
+      if (!wall(x + dx, y + dy)) continue;
+      const gx0 = dx > 0 ? px + TS : px, gy0 = dy > 0 ? py + TS : py;
+      const gr = g.createLinearGradient(gx0, gy0, gx0 - dx * D + (dy ? 0 : 0), gy0 - dy * D);
+      gr.addColorStop(0, `rgba(12,7,4,${a})`); gr.addColorStop(1, 'rgba(12,7,4,0)');
+      g.fillStyle = gr;
+      if (dy) g.fillRect(px, dy > 0 ? py + TS - D : py, TS, D); else g.fillRect(dx > 0 ? px + TS - D : px, py, D, TS);
+    }
+  }
+  // Walls: heavy bevelled blocks on the outer ring, courses of brick inside
+  for (let y = 0; y < ROOM; y++) for (let x = 0; x < ROOM; x++) {
+    if (!wall(x, y)) continue;
+    const px = x * TS, py = y * TS, ring = x === 0 || y === 0 || x === ROOM - 1 || y === ROOM - 1;
+    g.fillStyle = '#231e1a'; g.fillRect(px, py, TS, TS);
+    const base = (ring ? 168 : 116) + hash(x * 5 + s, y * 9) * 22, hs = hash(x + s * 2, y + 1);
+    if (ring) {
+      const along = y === 0 || y === ROOM - 1;
+      if (hs < 0.5) paintStone(g, px + 3, py + 3, TS - 6, TS - 6, base, x, y + s, 9);
+      else if (along) { paintStone(g, px + 3, py + 3, TS / 2 - 4, TS - 6, base, x, y + s, 8); paintStone(g, px + TS / 2 + 1, py + 3, TS / 2 - 4, TS - 6, base - 10, y, x + s, 8); }
+      else { paintStone(g, px + 3, py + 3, TS - 6, TS / 2 - 4, base, x, y + s, 8); paintStone(g, px + 3, py + TS / 2 + 1, TS - 6, TS / 2 - 4, base - 10, y, x + s, 8); }
+    } else {
+      g.save(); g.beginPath(); g.rect(px, py, TS, TS); g.clip();
+      for (let row = 0; row < 4; row++) for (let k = -1; k < 2; k++) {
+        const bx = px + (row % 2 ? TS / 4 : 0) + k * TS / 2;
+        paintStone(g, bx + 1.5, py + row * TS / 4 + 1.5, TS / 2 - 3, TS / 4 - 3, base + hash(row + x, k + y) * 14, row + s, k + x, 3);
+      }
+      g.restore();
+    }
+  }
+  // A dark edge where wall meets floor, so the walls read as raised
+  g.strokeStyle = '#120e0b'; g.lineWidth = 5; g.lineCap = 'square';
+  for (let y = 0; y < ROOM; y++) for (let x = 0; x < ROOM; x++) {
+    if (!wall(x, y)) continue;
+    const px = x * TS, py = y * TS;
+    for (const [dx, dy] of DIR4) {
+      if (wall(x + dx, y + dy)) continue;
+      g.beginPath();
+      if (dx) { const ex = dx > 0 ? px + TS : px; g.moveTo(ex, py); g.lineTo(ex, py + TS); }
+      else { const ey = dy > 0 ? py + TS : py; g.moveTo(px, ey); g.lineTo(px + TS, ey); }
+      g.stroke();
+    }
+  }
+  // Obstacles: a pillar, a pile of bones or rubble
+  for (let y = 0; y < ROOM; y++) for (let x = 0; x < ROOM; x++) {
+    if (at(x, y) !== 'o') continue;
+    const px = x * TS, py = y * TS, cx = px + TS / 2, cy = py + TS / 2, kind = hash(x * 13 + s, y * 17);
+    if (kind < 0.45) {
+      g.fillStyle = 'rgba(10,6,4,0.4)'; g.beginPath(); g.ellipse(cx + 5, cy + 6, 26, 24, 0, 0, Math.PI * 2); g.fill();
+      paintStone(g, px + 7, py + 7, TS - 14, TS - 14, 136, x, y, 7);
+      g.beginPath(); g.arc(cx, cy, 19, 0, Math.PI * 2); g.fillStyle = tint(158, 0); g.fill(); g.lineWidth = 2; g.strokeStyle = '#1e1813'; g.stroke();
+      g.beginPath(); g.arc(cx, cy, 13, 0, Math.PI * 2); g.strokeStyle = tint(158, -34); g.lineWidth = 2; g.stroke();
+      g.beginPath(); g.arc(cx, cy, 16, Math.PI * 1.05, Math.PI * 1.6); g.strokeStyle = tint(158, 40); g.lineWidth = 2.5; g.stroke();
+    } else if (kind < 0.75) {
+      g.fillStyle = 'rgba(46,34,24,0.65)'; g.beginPath(); g.ellipse(cx, cy, 27, 23, kind * 4, 0, Math.PI * 2); g.fill();
+      for (let k = 0; k < 7; k++) paintBone(g, cx + (hash(k, x + s) - 0.5) * 34, cy + (hash(y + s, k) - 0.5) * 30, 14 + hash(k, k + x) * 10, hash(k + y, s) * 6.28);
+      paintSkull(g, cx - 8, cy - 4, 0.95, kind * 3); paintSkull(g, cx + 10, cy + 8, 0.8, kind * 7);
+    } else {
+      for (let k = 0; k < 5; k++) {
+        const w = 14 + hash(k, x) * 12, h = 12 + hash(y, k) * 10;
+        paintStone(g, cx - w / 2 + (hash(k + s, y) - 0.5) * 26, cy - h / 2 + (hash(x, k + s) - 0.5) * 26, w, h, 118 + hash(k, s) * 26, k + x, k + y, 4);
+      }
+    }
+  }
+  // Bones on the floor, cobwebs in the corners
+  for (let y = 0; y < ROOM; y++) for (let x = 0; x < ROOM; x++) {
+    if (wall(x, y) || at(x, y) === 'o') continue;
+    const px = x * TS, py = y * TS, b = hash(x * 19 + s, y * 23 + s);
+    if (b < 0.11) for (let k = 0; k < 2 + (b < 0.05 ? 1 : 0); k++) paintBone(g, px + 14 + hash(k, x + y + s) * 36, py + 14 + hash(x + s, k + y) * 36, 13 + hash(k, s) * 10, hash(k * 3 + x, y) * 6.28);
+    if (b < 0.04) paintSkull(g, px + 30, py + 32, 0.9, b * 157);
+    for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      if (wall(x - sx, y) && wall(x, y - sy) && hash(x + sx * 3 + s, y + sy * 5) < 0.6)
+        paintWeb(g, sx > 0 ? px : px + TS, sy > 0 ? py : py + TS, sx, sy, 30 + hash(x, y + s) * 14);
+    }
+  }
+  // Torches
+  for (let y = 0; y < ROOM; y++) for (let x = 0; x < ROOM; x++) {
+    if (at(x, y) !== 't') continue;
+    const [dx, dy] = torchFacing(m, x, y);
+    paintTorch(g, x * TS + TS / 2, y * TS + TS / 2, dx, dy);
+  }
+  return (painted[key] = c);
+}
+function paintedDoor(open) { // 2x2 cells: a doorway in a north or south wall, passage top to bottom
+  const key = 'door:' + open;
+  if (painted[key]) return painted[key];
+  const S = 2 * TS, c = canvasOf(S, S), g = c.getContext('2d');
+  g.fillStyle = '#231e1a'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 4; i++) paintStone(g, 20 + (i % 2) * 46, 2 + (i >> 1) * 64, 44, 60, 102 + i * 5, i * 7 + 3, 5, 5);
+  paintStone(g, 2, 2, 17, S - 4, 150, 1, 2, 5); paintStone(g, S - 19, 2, 17, S - 4, 152, 3, 4, 5);
+  if (open) {
+    g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(19, S / 2 - 3, S - 38, 6);
+    rrp(g, 21, 6, 11, S - 12, 3); g.fillStyle = '#6b4526'; g.fill(); g.lineWidth = 2; g.strokeStyle = '#1e120a'; g.stroke();
+    g.fillStyle = '#3c3a40'; g.fillRect(21, 24, 11, 5); g.fillRect(21, S - 30, 11, 5);
+  } else {
+    const y = S / 2 - 20, h = 40;
+    g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(19, y + 4, S - 38, h);
+    rrp(g, 17, y, S - 34, h, 4); g.fillStyle = '#7a4c2a'; g.fill(); g.lineWidth = 2.5; g.strokeStyle = '#1e120a'; g.stroke();
+    g.strokeStyle = 'rgba(30,16,8,0.7)'; g.lineWidth = 1.5;
+    for (let k = 1; k < 6; k++) { const px = 17 + k * (S - 34) / 6; g.beginPath(); g.moveTo(px, y + 3); g.lineTo(px, y + h - 3); g.stroke(); }
+    g.fillStyle = '#3c3a40'; g.fillRect(17, y + 7, S - 34, 5); g.fillRect(17, y + h - 12, S - 34, 5);
+    g.beginPath(); g.arc(S - 32, S / 2, 5, 0, Math.PI * 2); g.lineWidth = 2.5; g.strokeStyle = '#d8b04a'; g.stroke();
+  }
+  return (painted[key] = c);
+}
+function paintedChest(open) { // 1 cell, seen from above
+  const key = 'chest:' + open;
+  if (painted[key]) return painted[key];
+  const c = canvasOf(TS, TS), g = c.getContext('2d'), x = 12, y = 18, w = 40, h = 30;
+  g.fillStyle = 'rgba(0,0,0,0.4)'; g.beginPath(); g.ellipse(34, 44, 24, 9, 0, 0, Math.PI * 2); g.fill();
+  g.lineWidth = 2; g.strokeStyle = '#1e120a';
+  if (open) {
+    rrp(g, x, y - 12, w, 12, 3); g.fillStyle = '#5a3418'; g.fill(); g.stroke();
+    rrp(g, x, y, w, h, 4); g.fillStyle = '#7a4a24'; g.fill(); g.stroke();
+    rrp(g, x + 5, y + 4, w - 10, h - 10, 3); g.fillStyle = '#24160c'; g.fill();
+    g.fillStyle = 'rgba(255,220,120,0.5)'; g.beginPath(); g.ellipse(32, y + 12, 10, 5, 0, 0, Math.PI * 2); g.fill();
+  } else {
+    rrp(g, x, y, w, h, 4); g.fillStyle = '#8a5428'; g.fill(); g.stroke();
+    g.fillStyle = 'rgba(30,16,8,0.6)'; g.fillRect(x + 2, y + 11, w - 4, 2);
+    g.fillStyle = '#d8b04a'; g.fillRect(x + 6, y, 4, h); g.fillRect(x + w - 10, y, 4, h);
+    g.beginPath(); g.arc(32, y + 12, 3.5, 0, Math.PI * 2); g.fill(); g.lineWidth = 1; g.stroke();
+  }
+  return (painted[key] = c);
+}
+
+// ---- Drawing: the board, from above ---------------------------------------------------------
+const light = new Float32Array(N * N);
+const lightCanvas = canvasOf(N, N), lctx = lightCanvas.getContext('2d'), lightData = lctx.createImageData(N, N);
+function computeLight() { // one pixel per cell: darkness and fog, drawn smoothed over the board
+  light.fill(tune.ambient_light);
+  const ls = [];
+  for (const t of state.torches) if (state.revealed[t.room]) ls.push([t.lx, t.ly, tune.torch_radius, 0.9 + 0.08 * Math.sin(state.t * 11 + t.x * 3.1), t.room]);
+  for (const h of state.heroes) { const d = dispPos(h); ls.push([d.x, d.y, h.downed ? 2 : tune.hero_light_radius, h.downed ? 0.5 : 0.8, -1]); }
+  const b = boss(); if (b && awake(b)) ls.push([b.x, b.y, 3, 0.4, -1]);
+  for (const f of state.fx) if (f.kind === 'boom' && f.t > 0) ls.push([f.a.x, f.a.y, 3.5, 1.2 * (1 - f.t / f.life), -1]);
+  for (const [lx, ly, r, k, room] of ls) {
+    const x0 = Math.max(0, Math.floor(lx - r)), x1 = Math.min(N - 1, Math.ceil(lx + r));
+    const y0 = Math.max(0, Math.floor(ly - r)), y1 = Math.min(N - 1, Math.ceil(ly + r));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if (room >= 0 && roomOf(x, y) !== room) continue; // a torch lights its own room
+      const d = Math.hypot(x - lx, y - ly); if (d < r) light[idx(x, y)] += (1 - d / r) * k;
+    }
+  }
+  const px = lightData.data;
+  for (let i = 0; i < N * N; i++) {
+    const x = i % N, y = (i / N) | 0, fa = fogAlpha(x, y), L = Math.min(1, light[i]);
+    const s = fa * (0.5 + 0.5 * Math.sin(state.t * 0.9 + hash(x, y) * 6.28)); // the fog breathes
+    px[i * 4] = 6 + 8 * fa + 5 * s; px[i * 4 + 1] = 5 + 10 * fa + 6 * s; px[i * 4 + 2] = 10 + 20 * fa + 12 * s;
+    px[i * 4 + 3] = Math.round(((1 - L) * 0.94 * (1 - fa) + fa) * 255);
+  }
+  lctx.putImageData(lightData, 0, 0);
+}
+function viewTiles() {
+  const hw = W / 2 / cam.zoom, hh = H / 2 / cam.zoom;
+  return { x0: Math.max(0, Math.floor((cam.x - hw) / TS) - 1), x1: Math.min(N - 1, Math.ceil((cam.x + hw) / TS) + 1),
+    y0: Math.max(0, Math.floor((cam.y - hh) / TS) - 1), y1: Math.min(N - 1, Math.ceil((cam.y + hh) / TS) + 1) };
+}
+function drawDoor(d) {
+  const img = artImage('doors', d.open ? 'open' : 'closed') || paintedDoor(d.open);
+  ctx.save(); ctx.translate((d.x0 + 1) * TS, (d.y0 + 1) * TS);
+  if (d.orient === 'v') ctx.rotate(Math.PI / 2);
+  ctx.drawImage(img, -TS, -TS, 2 * TS, 2 * TS); ctx.restore();
+}
+function drawChest(x, y, open) {
+  ctx.drawImage(artImage('props', open ? 'chest_open' : 'chest') || paintedChest(open), x * TS, y * TS, TS, TS);
+}
+function drawUnit(u) {
+  const d = dispPos(u), c = wpos(d.x, d.y), fx = c.x, fy = c.y + FEET, big = u.kind === 'boss';
+  const isActive = u.hero && state.phase === 'hero' && activeHero() === u && scene === 'play';
+  const img = artImage('units', u.kind);
+  El(fx, fy, big ? 30 : 20, big ? 11 : 8, 'rgba(0,0,0,0.45)', 0);
+  if (u.hero) {
+    ctx.lineWidth = isActive ? 3 + Math.sin(state.t * 6) : 2.2; ctx.strokeStyle = PLAYER_COLORS[u.player];
+    ctx.beginPath(); ctx.ellipse(fx, fy, 22, 10, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  if (u.flash > 0) ctx.filter = 'brightness(2.6)';
+  if (img) {
+    const sz = (big ? 2.2 : 1.2) * TS;
+    ctx.save(); ctx.translate(c.x, c.y);
+    if (u.downed) { ctx.filter = 'grayscale(0.8) brightness(0.65)'; ctx.rotate(-0.6); }
+    ctx.drawImage(img, -sz / 2, -sz / 2, sz, sz); ctx.restore();
+  } else if (u.hero && u.downed) {
+    ctx.save(); ctx.filter = 'grayscale(0.8) brightness(0.65)'; ctx.translate(fx - 6, fy - 2); ctx.rotate(-1.35);
+    ctx.scale(0.9 * u.face, 0.9); FIGS[u.kind](); ctx.restore();
+  } else drawFigure(u.kind, fx, fy, 1, u.face);
+  ctx.filter = 'none';
+  const top = (img ? c.y - (big ? 1.1 : 0.6) * TS : fy - (u.downed ? 26 : FIG_H[u.kind])) - 8;
+  if (u.hero || u.hp < u.maxHp || hoverUnit === u || big) {
+    const w = big ? 54 : 32;
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(fx - w / 2 - 1, top - 1, w + 2, 6);
+    ctx.fillStyle = u.hero ? '#5fd06a' : '#e0503a'; ctx.fillRect(fx - w / 2, top, w * u.hp / u.maxHp, 4);
+    if (u.shield) { ctx.fillStyle = '#8fc8ff'; ctx.fillRect(fx - w / 2, top - 4, Math.min(w, w * u.shield / u.maxHp), 3); }
+  }
+  if (!u.hero && !big) { // patrol: a half-closed eye; chase: a red open eye
+    const ey = top - 9, chase = u.state === 'chase';
+    El(fx, ey, 7, chase ? 4.5 : 2.2, chase ? '#ffe6e0' : '#9aa6c0', 1.5);
+    C(fx, ey, chase ? 2.4 : 1.2, chase ? '#e0302a' : '#3a4050', 0);
+  }
+}
+let hoverUnit = null;
+function visibleUnits() {
+  return [...state.heroes, ...state.enemies.filter(e => e.alive && unitVisible(e))];
+}
+function drawBoard() {
+  computeLight();
+  const v = viewTiles();
+  ctx.save();
+  const sh = state.shake > 0 ? state.shake * 14 : 0;
+  ctx.translate(W / 2 + Math.sin(state.t * 60) * sh, H / 2 + Math.cos(state.t * 47) * sh);
+  ctx.scale(cam.zoom, cam.zoom); ctx.translate(-cam.x, -cam.y);
+  ctx.imageSmoothingEnabled = true;
+  for (let r = 0; r < RW * RW; r++) { // the rooms: painted image, or its code-painted stand-in
+    if (!state.revealed[r]) continue;
+    const R = state.rooms[r], x = R.rc * ROOM, y = R.rr * ROOM;
+    if (x > v.x1 || x + ROOM - 1 < v.x0 || y > v.y1 || y + ROOM - 1 < v.y0) continue;
+    ctx.drawImage(artImage('rooms', R.tpl, R.variant) || paintedRoom(R.tpl), x * TS, y * TS, ROOM * TS, ROOM * TS);
+  }
+  for (const d of state.doors) if (doorSeen(d)) drawDoor(d);
+  for (let y = v.y0; y <= v.y1; y++) for (let x = v.x0; x <= v.x1; x++) {
+    const o = state.objs[idx(x, y)];
+    if ((o === 'chest' || o === 'chestOpen') && tileSeen(x, y)) drawChest(x, y, o === 'chestOpen');
+  }
+  ctx.drawImage(lightCanvas, 0, 0, N * TS, N * TS); // darkness and fog
+  drawHighlights();
+  for (const t of state.torches) { // torch light flickers over the dark
+    if (!state.revealed[t.room] || t.x < v.x0 || t.x > v.x1 || t.y < v.y0 || t.y > v.y1) continue;
+    const p = wpos(t.lx, t.ly);
+    glow(p.x, p.y, TS * 1.3 + Math.sin(state.t * 13 + t.x) * 5, 'rgba(255,150,60,0.22)');
+  }
+  const us = visibleUnits().map(u => ({ u, y: dispPos(u).y })).sort((a, b) => a.y - b.y);
+  for (const { u } of us) drawUnit(u);
+  drawIntents(); drawFx();
+  ctx.restore();
+  drawPops();
+}
+function tileMark(x, y, fill, stroke, lw = 1.5, w = 1, h = 1) {
+  rrp(ctx, x * TS + 4, y * TS + 4, w * TS - 8, h * TS - 8, 8);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+}
+function drawHighlights() {
+  const pulse = 0.5 + 0.5 * Math.sin(state.t * 5);
+  for (const s of state.slam) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const x = s.x + dx, y = s.y + dy;
+    if (inb(x, y) && tileSeen(x, y)) tileMark(x, y, `rgba(230,40,30,${0.22 + 0.18 * pulse})`, 'rgba(255,90,70,0.9)', 2);
+  }
+  if (scene !== 'play' || state.phase !== 'hero' || busy()) return;
+  const h = activeHero();
+  if (state.mode) {
+    const ts = modeTargets(h, state.mode);
+    for (const t of ts) tileMark(t.x, t.y, 'rgba(240,190,70,0.22)', 'rgba(255,215,110,0.9)');
+    const card = state.mode.card !== undefined ? CARDS[cardsOf(h)[state.mode.card]] : null;
+    if (card && card.target === 'area' && hoverTile && ts.some(t => t.x === hoverTile.x && t.y === hoverTile.y))
+      tileMark(hoverTile.x - 1, hoverTile.y - 1, 'rgba(255,120,40,0.3)', 'rgba(255,160,80,0.95)', 2.5, 3, 3);
+    return;
+  }
+  if (h.ap >= 1) {
+    const r = heroReach(h);
+    for (let i = 0; i < N * N; i++) if (r.dist[i] > 0) tileMark(i % N, (i / N) | 0, 'rgba(80,160,255,0.25)', 'rgba(150,205,255,0.75)', 1.2);
+    for (const e of state.enemies) if (canAttack(h, e)) tileMark(e.x, e.y, 'rgba(255,60,50,0.25)', 'rgba(255,90,70,0.95)', 2);
+    for (const d of state.doors) if (!d.open && doorNear(h, d)) tileMark(d.x0, d.y0, null, 'rgba(255,215,110,0.95)', 3, 2, 2);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = h.x + dx, y = h.y + dy; if (inb(x, y) && state.objs[idx(x, y)] === 'chest') tileMark(x, y, null, 'rgba(255,215,110,0.95)', 2.5); }
+  }
+  if (hoverTile && inb(hoverTile.x, hoverTile.y) && tileSeen(hoverTile.x, hoverTile.y)) tileMark(hoverTile.x, hoverTile.y, null, 'rgba(255,255,255,0.8)', 1.5);
+}
+function drawIntents() { // who each enemy is going for, read on the board
+  if (scene !== 'play') return;
+  const list = [];
+  for (const e of state.enemies) {
+    if (!awake(e) || e.kind === 'boss' || !unitVisible(e) || e.anim) continue;
+    const t = chooseTarget(e); if (t) list.push([e, t]);
+  }
+  ctx.setLineDash([6, 5]); ctx.strokeStyle = 'rgba(255,80,60,0.6)'; ctx.lineWidth = 2;
+  for (const [e, t] of list) {
+    const a = wpos(e.x, e.y), b = wpos(t.x, t.y);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y + FEET - FIG_H[e.kind] * 0.5); ctx.lineTo(b.x, b.y + FEET - 14); ctx.stroke();
+  }
+  ctx.setLineDash([]); ctx.strokeStyle = 'rgba(255,90,70,0.95)';
+  for (const [, t] of list) {
+    const b = wpos(t.x, t.y), mx = b.x + 18, my = b.y + FEET - 44;
+    ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(mx - 7, my); ctx.lineTo(mx + 7, my); ctx.moveTo(mx, my - 7); ctx.lineTo(mx, my + 7); ctx.stroke();
+  }
+}
+function drawFx() {
+  for (const f of state.fx) {
+    if (f.t < 0) continue;
+    const k = f.t / f.life, a = wpos(f.a.x, f.a.y), b = wpos(f.b.x, f.b.y);
+    if (f.kind === 'arrow' || f.kind === 'bolt') {
+      const x = a.x + (b.x - a.x) * k, y = a.y - 8 + (b.y - a.y) * k;
+      if (f.kind === 'bolt') { glow(x, y, 16, 'rgba(120,220,255,0.8)'); C(x, y, 4, '#bff4ff', 0); }
+      else { const ang = Math.atan2(b.y - a.y, b.x - a.x); Ln(x - Math.cos(ang) * 12, y - Math.sin(ang) * 12, x, y, '#e8dcc0', 1.5); }
+    } else if (f.kind === 'boom') {
+      glow(a.x, a.y, 100 * (0.4 + k), `rgba(255,${140 - k * 80},40,${0.9 * (1 - k)})`);
+    } else if (f.kind === 'rain') {
+      for (let i = 0; i < 12; i++) { const ox = (hash(i, 3) - 0.5) * 160, oy = (hash(3, i) - 0.5) * 160; const y = a.y + oy - 60 * (1 - k); Ln(a.x + ox, y - 10, a.x + ox, y, '#e8dcc0', 1.2); }
+    } else if (f.kind === 'heal') {
+      for (let i = 0; i < 6; i++) { const ox = Math.sin(i * 2.1) * 14, y = a.y + FEET - 10 - k * 40 - i * 4; P([a.x + ox - 3, y, a.x + ox + 3, y, a.x + ox, y - 5], `rgba(140,240,150,${1 - k})`, 0); }
+    } else if (f.kind === 'ring') {
+      ctx.strokeStyle = `rgba(150,210,255,${1 - k})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(a.x, a.y + FEET, 22 + 60 * k, 10 + 30 * k, 0, 0, Math.PI * 2); ctx.stroke();
+    } else if (f.kind === 'spark') {
+      glow(a.x, a.y - 8, 34 * (1 - k) + 6, `rgba(170,140,255,${0.9 * (1 - k)})`);
+    } else if (f.kind === 'slam') {
+      glow(a.x, a.y, 110 * (0.5 + k), `rgba(255,70,40,${0.8 * (1 - k)})`);
+      ctx.strokeStyle = `rgba(40,20,20,${1 - k})`; ctx.lineWidth = 2;
+      for (let i = 0; i < 6; i++) { const ang = i * 1.05; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x + Math.cos(ang) * 70 * (0.4 + k), a.y + Math.sin(ang) * 70 * (0.4 + k)); ctx.stroke(); }
+    }
+  }
+}
+function drawPops() {
+  for (const p of state.pops) {
+    if (p.t < 0) continue;
+    const w = wpos(p.x, p.y), s = toScreen(w.x, w.y);
+    ctx.globalAlpha = clamp(1.6 - p.t / p.life * 1.6, 0, 1);
+    textO(p.txt, s.x, s.y + (FEET - 70) * cam.zoom - p.t * 30, 20, p.color);
+    ctx.globalAlpha = 1;
+  }
+  const d = state.dice;
+  if (d && d.t >= 0) { // the d20, tumbling, then its face
+    const w = wpos(d.x, d.y), s = toScreen(w.x, w.y), x = s.x - 52, y = s.y + (FEET - 92) * cam.zoom;
+    const rolling = d.t < 0.3, n = rolling ? 1 + Math.floor(hash(Math.floor(d.t * 30), 7) * 20) : d.roll;
+    ctx.save(); ctx.translate(x, y); if (rolling) ctx.rotate(d.t * 18);
+    const pts = []; for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; pts.push(Math.cos(a) * 22, Math.sin(a) * 22); }
+    P(pts, d.who === 'enemy' ? '#5a2a30' : '#2a2a48', 2.5);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(19, 11); ctx.lineTo(-19, 11); ctx.closePath(); ctx.stroke();
+    ctx.restore();
+    textO(String(n), x, y + 1, 18, rolling ? '#ffffff' : (d.hit ? (d.crit ? '#ffd34a' : '#9fe7a8') : '#ff8a7a'));
+    if (!rolling) textO(`${d.need}+`, x, y + 34, 14, '#e8e0d0');
+  }
+}
+
+// ---- Drawing: HUD -----------------------------------------------------------------------
+function rrect(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+function panel(x, y, w, h, border = '#8a6a3a', fill = 'rgba(16,12,22,0.88)') {
+  rrect(x, y, w, h, 8); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = border; ctx.lineWidth = 2; ctx.stroke();
+}
+function gem(x, y, on, s = 8) {
+  P([x, y - s, x + s * 0.75, y, x, y + s, x - s * 0.75, y], on ? '#f2b347' : '#3a3040', 1.5);
+  if (on) P([x, y - s * 0.6, x + s * 0.35, y - s * 0.1, x, y + s * 0.1], 'rgba(255,240,200,0.7)', 0);
+}
+function flask(x, y) {
+  P([x - 3, y - 12, x + 3, y - 12, x + 3, y - 7, x + 7, y + 2, x - 7, y + 2, x - 3, y - 7], '#7fd88a', 1.5);
+  ctx.fillStyle = '#7a4e2a'; ctx.fillRect(x - 3, y - 15, 6, 3);
+}
+function button(x, y, w, h, label, enabled, act, active = false) {
+  rrect(x, y, w, h, 6);
+  ctx.fillStyle = active ? '#5a4420' : enabled ? 'rgba(48,38,58,0.95)' : 'rgba(30,26,36,0.9)'; ctx.fill();
+  ctx.strokeStyle = enabled ? '#c9a24a' : '#4a4050'; ctx.lineWidth = 2; ctx.stroke();
+  text(label, x + w / 2, y + h / 2 + 1, 16, enabled ? '#f0e6d0' : '#a49aa8');
+  if (enabled) ui.push({ x, y, w, h, act });
+}
+function drawCard(x, y, w, h, hero, i) {
+  const id = cardsOf(hero)[i], card = CARDS[id], cost = tune[id + '_cost'], cd = hero.cds[i];
+  const ready = cd === 0 && hero.ap >= cost, sel = state.mode && state.mode.card === i;
+  rrect(x, y, w, h, 10);
+  ctx.fillStyle = sel ? '#4a3a1c' : '#2a2032'; ctx.fill();
+  ctx.strokeStyle = sel ? '#ffd56a' : ready ? '#c9a24a' : '#5a4a50'; ctx.lineWidth = sel ? 3 : 2; ctx.stroke();
+  text(card.name, x + 12, y + 18, 17, '#f4e6c4', 'left', true);
+  for (let k = 0; k < cost; k++) gem(x + w - 16 - k * 14, y + 18, true, 7);
+  card.text().forEach((l, k) => text(l, x + 12, y + 44 + k * 18, 14, '#d6ccbc', 'left'));
+  text(`${i + 1}`, x + w - 12, y + h - 14, 14, '#9a8a70', 'right');
+  if (cd > 0) {
+    rrect(x, y, w, h, 10); ctx.fillStyle = 'rgba(8,6,12,0.7)'; ctx.fill();
+    text(`Recarga: ${cd} turno${cd > 1 ? 's' : ''}`, x + w / 2, y + h / 2, 17, '#e8d8b8', 'center', true);
+  }
+  if (state.phase === 'hero') ui.push({ x, y, w, h, act: () => pickCard(i) });
+}
+function drawHUD() {
+  const h = activeHero();
+  // Turn and AP
+  panel(12, 12, 440, 70);
+  if (state.phase === 'hero') {
+    C(32, 34, 8, PLAYER_COLORS[h.player], 2);
+    text(`Ronda ${state.round} · Jugador ${h.player + 1} · ${CLASS_INFO[h.cls].name}`, 48, 34, 19, '#f4e6c4', 'left', true);
+    text('PA', 30, 62, 15, '#d6ccbc', 'left');
+    for (let k = 0; k < tune.ap_per_turn; k++) gem(64 + k * 20, 62, k < h.ap);
+    text(`Vida ${h.hp}/${h.maxHp}${h.shield ? ` · Escudo ${h.shield}` : ''}`, 64 + tune.ap_per_turn * 20 + 10, 62, 15, '#d6ccbc', 'left');
+  } else {
+    text(`Ronda ${state.round} · Turno de los enemigos`, 28, 34, 19, '#ff9a8a', 'left', true);
+    text('Mantén Espacio o F para acelerar', 28, 62, 15, '#d6ccbc', 'left');
+  }
+  // Goal
+  panel(W - 372, 12, 360, 70);
+  text('Objetivo: derrota a El Carcelero', W - 356, 34, 18, '#f4e6c4', 'left', true);
+  const b = boss();
+  if (b && awake(b)) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(W - 356, 54, 328, 14);
+    ctx.fillStyle = '#c0392b'; ctx.fillRect(W - 356, 54, 328 * b.hp / b.maxHp, 14);
+    text(`${b.hp}/${b.maxHp}`, W - 192, 61, 14, '#fff');
+  } else text('Espera en la sala central. No saldrá de ella.', W - 356, 62, 15, '#b8ae9c', 'left');
+  drawMinimap();
+  // Party
+  const py = 92;
+  panel(12, py, 250, 12 + state.heroes.length * 50);
+  state.heroes.forEach((o, k) => {
+    const y = py + 8 + k * 50;
+    if (o === h && state.phase === 'hero') { rrect(18, y, 238, 46, 6); ctx.fillStyle = 'rgba(255,215,110,0.12)'; ctx.fill(); }
+    ctx.save(); if (o.downed) ctx.filter = 'grayscale(0.9) brightness(0.6)'; drawFigure(o.cls, 40, y + 42, 0.62); ctx.restore();
+    C(62, y + 12, 5, PLAYER_COLORS[o.player], 1.5);
+    text(`J${o.player + 1} ${CLASS_INFO[o.cls].name}`, 72, y + 13, 15, o.downed ? '#ff8a7a' : '#f0e6d0', 'left', true);
+    if (o.downed) text('Derribado: ¡un Tónico!', 62, y + 33, 14, '#ff8a7a', 'left');
+    else {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(62, y + 28, 110, 9);
+      ctx.fillStyle = '#5fd06a'; ctx.fillRect(62, y + 28, 110 * o.hp / o.maxHp, 9);
+      text(`${o.hp}/${o.maxHp}`, 178, y + 33, 14, '#d6ccbc', 'left');
+    }
+    flask(228, y + 18); text(`${o.tonics}`, 244, y + 14, 14, '#d6ccbc', 'center');
+  });
+  // Cards and buttons
+  if (state.phase === 'hero') {
+    const cw = 214, ch = 116, cy = H - ch - 12, cx = W / 2 - cw - 60;
+    drawCard(cx, cy, cw, ch, h, 0); drawCard(cx + cw + 10, cy, cw, ch, h, 1);
+    const bx = cx + 2 * cw + 22, bw = 210;
+    const canTonic = h.tonics > 0 && h.ap >= 1;
+    button(bx, cy, bw, 34, `Tónico (T) · ${h.tonics}`, canTonic, toggleTonic, !!(state.mode && state.mode.tonic));
+    button(bx, cy + 40, bw, 34, 'Deshacer mover (Z)', !!(state.undo && state.undo.hero === h.id), undoMove);
+    button(bx, cy + 80, bw, 36, 'Fin de turno (Espacio)', true, endHeroTurn);
+  }
+  // Log
+  const lines = state.log.slice(-3);
+  lines.forEach((l, k) => textO(l, 16, H - 70 + k * 20, 14, k === lines.length - 1 ? '#f0e6d0' : '#a89e8c', 'left', false));
+  // Turn banner
+  if (state.banner) {
+    const a = clamp(state.banner.t < 0.2 ? state.banner.t / 0.2 : (1.8 - state.banner.t) / 0.5, 0, 1);
+    ctx.globalAlpha = a;
+    textO(state.banner.text, W / 2, 128, 34, '#f8eed8');
+    ctx.fillStyle = state.banner.color; ctx.fillRect(W / 2 - 90, 152, 180, 4);
+    ctx.globalAlpha = 1;
+  }
+  if (state.mode && state.phase === 'hero') {
+    const msg = state.mode.tonic ? 'Tónico: clic en ti (bebes) o en un aliado derribado a tu lado' : `${CARDS[cardsOf(h)[state.mode.card]].name}: elige un objetivo dorado · clic derecho o Esc cancela`;
+    textO(msg, W / 2, H - 150, 16, '#ffd56a', 'center', false);
+  }
+  drawTooltip();
+}
+function drawMinimap() { // the 5x5 rooms: what is open, the doors you have seen, where everyone is
+  const S = tune.minimap_size, c = S / RW, x0 = W - 12 - S - 6, y0 = 98;
+  panel(x0 - 6, y0 - 6, S + 12, S + 12, '#6a5a3a', 'rgba(10,8,14,0.88)');
+  for (let r = 0; r < RW * RW; r++) {
+    const rx = x0 + (r % RW) * c, ry = y0 + ((r / RW) | 0) * c;
+    ctx.fillStyle = state.revealed[r] ? '#6e6456' : '#1a1924'; ctx.fillRect(rx + 2, ry + 2, c - 4, c - 4);
+    if (r === BOSS_ROOM) { ctx.strokeStyle = '#d0453a'; ctx.lineWidth = 2; ctx.strokeRect(rx + 3, ry + 3, c - 6, c - 6); }
+  }
+  for (const d of state.doors) {
+    if (!doorSeen(d)) continue;
+    const mx = x0 + (d.x0 + 1) / N * S, my = y0 + (d.y0 + 1) / N * S;
+    ctx.fillStyle = d.open ? '#e8c45a' : '#9a5e2a'; ctx.fillRect(mx - 3, my - 3, 6, 6);
+  }
+  for (const h of state.heroes) C(x0 + (h.x + 0.5) / N * S, y0 + (h.y + 0.5) / N * S, 3.5, h.downed ? '#777' : PLAYER_COLORS[h.player], 1);
+  const v = { x: (cam.x - W / 2 / cam.zoom) / (N * TS) * S, y: (cam.y - H / 2 / cam.zoom) / (N * TS) * S };
+  ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, S, S); ctx.clip();
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.2;
+  ctx.strokeRect(x0 + v.x, y0 + v.y, W / cam.zoom / (N * TS) * S, H / cam.zoom / (N * TS) * S);
+  ctx.restore();
+  ui.push({ x: x0, y: y0, w: S, h: S, act: () => {
+    const rc = clamp(Math.floor((mouse.x - x0) / c), 0, RW - 1), rr = clamp(Math.floor((mouse.y - y0) / c), 0, RW - 1);
+    camTo(rc * ROOM + ROOM / 2 - 0.5, rr * ROOM + ROOM / 2 - 0.5);
+  } });
+}
+function drawTooltip() {
+  if (state.phase !== 'hero' || busy() || mouse.x < 0 || uiHit(mouse.x, mouse.y)) return;
+  const h = activeHero(), lines = [];
+  const u = hoverUnit, t = hoverTile;
+  if (u && !u.hero) {
+    lines.push([`${ENEMY_NAMES[u.kind]} · vida ${u.hp}/${u.maxHp}`, '#f4e6c4']);
+    const aimed = state.mode && state.mode.card !== undefined && cardsOf(h)[state.mode.card] === 'aimed';
+    if (state.mode && !aimed) { /* card targeting: the gold tiles say it */ }
+    else if (canAttack(h, u)) {
+      const o = aimed ? { ignoreCover: true, bonus: tune.aimed_bonus_hit } : {};
+      const c = hitChance(h, u, o), dmg = hstat(h, 'dmg') + (aimed ? tune.aimed_bonus_dmg : 0);
+      lines.push([`Ataque: ${c.ch}% (${c.need}+ en d20) · ${dmg} daño`, '#ffd56a']);
+      if (c.parts.length) lines.push([c.parts.join(' · '), '#d6ccbc']);
+    } else lines.push([los(h, u) ? 'Fuera de alcance' : 'Sin línea de visión', '#b8ae9c']);
+    if (u.kind === 'boss') lines.push(['Marca un área 3x3 que golpea el turno enemigo siguiente', '#ff9a8a']);
+    else {
+      const tg = chooseTarget(u);
+      lines.push([u.state === 'patrol' ? (tg ? `Patrulla, pero te verá: irá a por J${tg.player + 1}` : 'Patrulla: aún no os ha visto') : (tg ? `Persigue a J${tg.player + 1}` : 'Os busca donde os vio por última vez'), '#d6ccbc']);
+    }
+  } else if (u && u.hero) {
+    lines.push([`J${u.player + 1} ${CLASS_INFO[u.cls].name} · vida ${u.hp}/${u.maxHp}`, '#f4e6c4']);
+  } else if (t && inb(t.x, t.y) && tileSeen(t.x, t.y)) {
+    const i = idx(t.x, t.y);
+    if (state.slam.some(s => cheb(s, t) <= 1)) lines.push([`El Carcelero golpeará aquí: ${tune.boss_slam_dmg} daño`, '#ff9a8a']);
+    if (state.tiles[i] === T_DOOR) lines.push([doorNear(h, state.doors[state.doorAt[i]]) ? 'Abrir puerta (1 PA)' : 'Puerta: ponte al lado para abrirla', '#f4e6c4']);
+    else if (state.objs[i] === 'chest') lines.push([cheb(h, t) === 1 ? 'Abrir cofre (1 PA): un Tónico' : 'Cofre: ponte al lado', '#f4e6c4']);
+    else if (state.objs[i] === 'pillar') lines.push(['Obstáculo: cobertura (los disparos a través fallan más)', '#d6ccbc']);
+  }
+  if (!lines.length) return;
+  ctx.font = `15px ${FONT}`;
+  const w = Math.max(...lines.map(l => ctx.measureText(l[0]).width)) + 20, hh = lines.length * 20 + 12;
+  const x = clamp(mouse.x + 18, 8, W - w - 8), y = clamp(mouse.y + 18, 8, H - hh - 8);
+  panel(x, y, w, hh, '#6a5a3a', 'rgba(10,8,14,0.92)');
+  lines.forEach((l, k) => text(l[0], x + 10, y + 16 + k * 20, 15, l[1], 'left'));
+}
+
+// ---- Scenes -----------------------------------------------------------------------------
+let hoverTile = null;
+function backdrop() {
+  clear('#07060b');
+  const g = ctx.createRadialGradient(W / 2, H * 0.55, 40, W / 2, H * 0.55, 620);
+  g.addColorStop(0, 'rgba(120,70,30,0.55)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  const room = artImage('rooms', 'pilares') || paintedRoom(TEMPLATES.pilares ? 'pilares' : TEMPLATE_IDS[0]), s = 860;
+  ctx.globalAlpha = 0.5; ctx.drawImage(room, W / 2 - s / 2, H / 2 - s / 2 + 30, s, s); ctx.globalAlpha = 1;
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const v = ctx.createRadialGradient(W / 2, H / 2, 160, W / 2, H / 2, 700);
+  v.addColorStop(0, 'rgba(5,4,8,0)'); v.addColorStop(1, 'rgba(5,4,8,0.95)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+}
+function arrowBtn(x, y, dir, act) {
+  P([x - 9 * dir, y - 11, x + 9 * dir, y, x - 9 * dir, y + 11], '#c9a24a', 2);
+  ui.push({ x: x - 16, y: y - 16, w: 32, h: 32, act });
+}
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() {
+      backdrop();
+      const kinds = ['warrior', 'mage', 'healer', 'archer', 'skeleton', 'goblin', 'rat', 'boss'];
+      const names = ['Guerrero', 'Mago', 'Curandero', 'Arquero', 'Esqueleto', 'Arquero goblin', 'Rata de cripta', 'El Carcelero'];
+      kinds.forEach((k, i) => {
+        const x = 90 + i * 157, y = 420;
+        El(x, y, k === 'boss' ? 40 : 26, k === 'boss' ? 14 : 10, 'rgba(0,0,0,0.5)', 0);
+        drawFigure(k, x, y, 2, i < 4 ? 1 : -1);
+        textO(names[i], x, y + 50, 18, '#f4e6c4');
+      });
+      textO('Antorchas y Dados · figuras', W / 2, 60, 30, '#f2c46a');
+    },
+  },
+  title: {
+    update() {
+      if (pressed('Enter') || pressed('Space') || clicks.length) { scene = 'setup'; setup.row = 0; }
+    },
+    draw() {
+      backdrop();
+      textO(TITLE, W / 2, 92, 66, '#f2c46a');
+      text('Una mazmorra a oscuras, de 1 a 4 héroes en la misma pantalla', W / 2, 146, 20, '#d6ccbc');
+      ['warrior', 'mage', 'healer', 'archer'].forEach((k, i) => drawFigure(k, W / 2 - 240 + i * 160, 330, 2.2, i < 2 ? 1 : -1));
+      panel(W / 2 - 440, 392, 880, 226, '#6a5a3a', 'rgba(10,8,14,0.82)');
+      CONTROLS.forEach((c, i) => text(c, W / 2, 420 + i * 34, 17, '#e0d6c4'));
+      textO('Enter o clic para empezar', W / 2, H - 56, 26, '#ffffff');
+    },
+  },
+  setup: {
+    update() {
+      for (const c of clicks) { const u = uiHit(c.x, c.y); if (u) u.act(); }
+      const rows = setup.count + 1;
+      if (pressed('ArrowUp') || pressed('KeyW')) setup.row = (setup.row + rows - 1) % rows;
+      if (pressed('ArrowDown') || pressed('KeyS')) setup.row = (setup.row + 1) % rows;
+      const dir = (pressed('ArrowRight') || pressed('KeyD')) ? 1 : (pressed('ArrowLeft') || pressed('KeyA')) ? -1 : 0;
+      if (dir) changeSetup(setup.row, dir);
+      for (let k = 1; k <= 4; k++) if (pressed('Digit' + k)) { setup.count = k; setup.row = Math.min(setup.row, k); }
+      if (pressed('Escape')) scene = 'title';
+      if (pressed('Enter') || pressed('Space')) startGame();
+    },
+    draw() {
+      backdrop();
+      textO('Prepara la partida', W / 2, 70, 44, '#f2c46a');
+      panel(W / 2 - 360, 112, 720, 120 + setup.count * 76, '#8a6a3a', 'rgba(10,8,14,0.86)');
+      const rowY = r => 160 + (r === 0 ? 0 : 40 + (r - 1) * 76);
+      if (setup.row === 0) { rrect(W / 2 - 340, rowY(0) - 26, 680, 52, 8); ctx.fillStyle = 'rgba(255,215,110,0.12)'; ctx.fill(); }
+      text('Jugadores', W / 2 - 300, rowY(0), 24, '#f4e6c4', 'left', true);
+      arrowBtn(W / 2 + 100, rowY(0), -1, () => changeSetup(0, -1));
+      text(`${setup.count}`, W / 2 + 160, rowY(0), 30, '#ffffff', 'center', true);
+      arrowBtn(W / 2 + 220, rowY(0), 1, () => changeSetup(0, 1));
+      for (let i = 0; i < setup.count; i++) {
+        const y = rowY(i + 1);
+        if (setup.row === i + 1) { rrect(W / 2 - 340, y - 36, 680, 72, 8); ctx.fillStyle = 'rgba(255,215,110,0.12)'; ctx.fill(); }
+        C(W / 2 - 300, y, 10, PLAYER_COLORS[i], 2);
+        text(`Jugador ${i + 1}`, W / 2 - 280, y, 22, '#f4e6c4', 'left', true);
+        text(['esquina noroeste', 'esquina sureste', 'esquina noreste', 'esquina suroeste'][i], W / 2 - 280, y + 24, 14, '#a89e8c', 'left');
+        arrowBtn(W / 2 + 40, y, -1, () => changeSetup(i + 1, -1));
+        drawFigure(setup.classes[i], W / 2 + 100, y + 28, 0.95);
+        text(CLASS_INFO[setup.classes[i]].name, W / 2 + 186, y, 22, '#ffffff', 'center', true);
+        arrowBtn(W / 2 + 270, y, 1, () => changeSetup(i + 1, 1));
+      }
+      const by = 112 + 120 + setup.count * 76 + 20;
+      button(W / 2 - 130, by, 260, 48, 'Entrar en la mazmorra (Enter)', true, startGame);
+      text('Flechas: elegir y cambiar · 1-4: número de jugadores · Esc: volver', W / 2, by + 74, 16, '#b8ae9c');
+    },
+  },
+  play: {
+    update(dt) {
+      state.t += dt;
+      hoverUnit = unitAtScreen(mouse.x, mouse.y);
+      hoverTile = hoverUnit ? { x: hoverUnit.x, y: hoverUnit.y } : screenToTile(mouse.x, mouse.y);
+      updateCamera(dt);
+      updateAnims(dt);
+      if (state.endTimer > 0) {
+        state.endTimer -= dt;
+        if (state.endTimer <= 0) scene = state.won ? 'results' : 'over';
+        return;
+      }
+      if (state.phase === 'hero') heroPhase(); else enemyPhase(dt);
+    },
+    draw() {
+      clear('#05050a');
+      drawBoard();
+      drawHUD();
+    },
+  },
+  over: {
+    update(dt) {
+      state.t += dt;
+      if (pressed('KeyR') || pressed('Enter') || clicks.length) startGame();
+      if (pressed('Escape')) scene = 'title';
+    },
+    draw() {
+      clear('#05050a'); drawBoard();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H);
+      textO(state.gained || 'Todos los héroes han caído', W / 2, H / 2 - 40, 46, '#ff8a7a');
+      text(`Ronda ${state.round} · enemigos derrotados: ${state.score}`, W / 2, H / 2 + 14, 20, '#e0d6c4');
+      textO('R, Enter o clic: reintentar el nivel · Esc: menú', W / 2, H / 2 + 64, 22, '#ffffff', 'center', false);
+    },
+  },
+  results: {
+    update(dt) {
+      state.t += dt;
+      if (pressed('Enter') || clicks.length) { scene = 'title'; reset(); }
+      if (pressed('KeyR')) startGame();
+    },
+    draw() {
+      clear('#05050a'); drawBoard();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, W, H);
+      textO('¡Victoria!', W / 2, 120, 58, '#f2c46a');
+      text(state.gained, W / 2, 176, 22, '#f0e6d0');
+      panel(W / 2 - 340, 210, 680, 40 + state.heroes.length * 64, '#8a6a3a', 'rgba(10,8,14,0.88)');
+      state.heroes.forEach((o, k) => {
+        const y = 250 + k * 64;
+        drawFigure(o.cls, W / 2 - 290, y + 24, 0.8);
+        C(W / 2 - 250, y - 6, 6, PLAYER_COLORS[o.player], 1.5);
+        text(`Jugador ${o.player + 1} · ${CLASS_INFO[o.cls].name}`, W / 2 - 236, y - 6, 20, '#f4e6c4', 'left', true);
+        text(`Daño ${o.stats.dmg} · Enemigos en los que participó ${o.stats.kills} · Ayudas ${o.stats.help}`, W / 2 - 250, y + 20, 16, '#d6ccbc', 'left');
+      });
+      textO('Enter o clic: volver al menú · R: jugar otra vez', W / 2, H - 50, 22, '#ffffff', 'center', false);
+    },
+  },
+};
+function changeSetup(row, dir) {
+  if (row === 0) { setup.count = clamp(setup.count + dir, 1, 4); setup.row = Math.min(setup.row, setup.count); }
+  else { const i = row - 1, k = CLASSES.indexOf(setup.classes[i]); setup.classes[i] = CLASSES[(k + dir + 4) % 4]; }
+}
+function startGame() { reset(); scene = 'play'; events.push({ type: 'start', players: setup.count, classes: setup.classes.slice(0, setup.count) }); }
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  scenes[scene].update(STEP); hit.clear(); clicks.length = 0;
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() {
+  ui = [];
+  ctx.setTransform(baseTransform);
+  scenes[scene].draw();
+  if (muted && scene !== 'figures') textO('Silencio (M)', W - 14, H - 16, 14, '#a89e8c', 'right', false);
+}
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+loadArt();
+reset();
+scene = params.get('scene') || 'title';
+if (scene === 'play') startGame();
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>
