@@ -35,7 +35,7 @@ const TITLE = 'Antorchas y Dados';
 const CONTROLS = [
   'Clic en una casilla azul: mover (1 PA)',
   'Clic en un enemigo: atacar (1 PA) · en una puerta o cofre al lado: abrir (1 PA)',
-  'Clic en una carta o teclas 1 / 2: usarla · clic derecho o Esc: cancelar',
+  'Clic en tu habilidad o tecla 1: usarla · clic derecho o Esc: cancelar',
   'Espacio: fin de turno · Z: deshacer movimiento · T: tónico',
   'Flechas / WASD o arrastrar con clic derecho: cámara · rueda: zoom · C: centrar · minimapa: ir a una sala',
   'M: silencio',
@@ -209,25 +209,42 @@ function checkTemplates() { // the rules rooms.js states; a broken card is named
 }
 checkTemplates();
 
-const CLASSES = ['warrior', 'mage', 'healer', 'archer'];
-const CLASS_INFO = {
-  warrior: { name: 'Guerrero', cards: ['charge', 'shout'] },
-  mage: { name: 'Mago', cards: ['fireball', 'blink'] },
-  healer: { name: 'Curandero', cards: ['heal', 'ward'] },
-  archer: { name: 'Arquero', cards: ['aimed', 'volley'] },
+// The hero deck (design/heroes.md): each player draws one. Stats live in config.js as <id>_<stat>;
+// color is the hero's reserved colour (art bible §4); no is the equipment line, not used yet.
+const HEROES = {
+  flink: { name: 'Flink el herrero', short: 'Flink', role: 'Apoyo resistente', color: '#ff7a1f', ability: 'forge' },
+  natwure: { name: 'Natwure', short: 'Natwure', role: 'Invocador', color: '#5fd13a', ability: 'tree', no: 'No puede usar Espadas' },
+  sombra: { name: 'Sombra', short: 'Sombra', role: 'Exploradora', color: '#7fd4ff', ability: 'ghost' },
+  gorm: { name: 'Gorm el muro', short: 'Gorm', role: 'Tanque', color: '#c8763a', ability: 'guard', no: 'No puede usar Arcos' },
+  orla: { name: 'Hermana Orla', short: 'Orla', role: 'Curandera', color: '#c9d1dc', ability: 'hands' },
+  kesh: { name: 'Kesh la cazadora', short: 'Kesh', role: 'Tiradora', color: '#2ec4b6', ability: 'aimed', no: 'No puede usar Armaduras pesadas' },
+  morwen: { name: 'Morwen la hechicera', short: 'Morwen', role: 'Control en área', color: '#b38be8', ability: 'chains' },
+  mirko: { name: 'Mirko el tahúr', short: 'Mirko', role: 'Manipula dados', color: '#e04ca0', ability: 'reroll' },
+  velia: { name: 'Velia la farolera', short: 'Velia', role: 'Luz y cobertura', color: '#f2e14a', ability: 'lantern' },
+  pip: { name: 'Pip la ganzúa', short: 'Pip', role: 'Puertas y cofres', color: '#ece3cc', ability: 'lockpick' },
 };
-const ENEMY_NAMES = { skeleton: 'Esqueleto', goblin: 'Arquero goblin', rat: 'Rata de cripta', boss: 'El Carcelero' };
+const HERO_IDS = Object.keys(HEROES);
+const ENEMY_NAMES = { skeleton: 'Esqueleto', goblin: 'Arquero goblin', rat: 'Rata de cripta', boss: 'El Carcelero', tree: 'Árbol guardián' };
 const PLAYER_COLORS = ['#e8573f', '#3f8fe8', '#e8c43f', '#4fc46a'];
-const CARDS = {
-  charge: { name: 'Embestida', target: 'enemyAdj', text: () => [`Empuja ${tune.charge_push} casillas a un`, `enemigo al lado: ${tune.charge_dmg} daño,`, `+${tune.charge_crash} si choca.`] },
-  shout: { name: 'Grito de guardia', target: 'self', text: () => [`Enemigos a ${tune.shout_radius} o menos`, 'van a por ti este', `turno. Escudo ${tune.shout_shield}.`] },
-  fireball: { name: 'Bola de fuego', target: 'area', range: 'fireball_range', text: () => ['Área 3x3 a la vista:', `${tune.fireball_dmg} daño a enemigos.`, 'Siempre acierta.'] },
-  blink: { name: 'Parpadeo', target: 'tile', range: 'blink_range', text: () => ['Te teletransportas a', `una casilla libre a ${tune.blink_range}`, 'o menos.'] },
-  heal: { name: 'Sanar', target: 'ally', range: 'heal_range', text: () => [`Cura ${tune.heal_amount} a un aliado`, `a ${tune.heal_range} casillas o menos`, '(o a ti).'] },
-  ward: { name: 'Escudo de luz', target: 'ally', range: 'ward_range', text: () => [`Escudo ${tune.ward_shield} a un aliado`, `a ${tune.ward_range} o menos, hasta`, 'el fin del turno enemigo.'] },
-  aimed: { name: 'Disparo certero', target: 'enemy', text: () => ['Ataque que ignora la', `cobertura, +${tune.aimed_bonus_hit}% y`, `+${tune.aimed_bonus_dmg} daño.`] },
-  volley: { name: 'Lluvia de flechas', target: 'area', range: 'volley_range', text: () => ['Área 3x3 a la vista:', `${tune.volley_dmg} daño a enemigos.`, 'Siempre acierta.'] },
+// One ability per hero. Passive ones have no target and are never picked; active ones cost
+// <id>_cost AP and cool down <id>_cd of the hero's own turns.
+const ABILITIES = {
+  forge: { name: 'Forja', passive: true, text: () => ['Al empezar tu turno tiras el d20:', `con ${tune.forge_on}+ das escudo ${tune.forge_shield} al`, `más herido a ${tune.forge_range} o menos (o a ti).`] },
+  tree: { name: 'Árbol guardián', target: 'adj', text: () => ['Un árbol en una casilla a tu lado:', `ataque ${tune.tree_atk}, defensa ${tune.tree_def}, vida ${tune.tree_hp}.`, 'Atrae a los enemigos que lo ven.'] },
+  ghost: { name: 'Incorpórea', passive: true, text: () => ['Al moverte atraviesas muros,', 'pero no acabas dentro de uno.', 'Cruzar a una carta la gira.'] },
+  guard: { name: 'Escudo humano', passive: true, text: () => ['Una vez por turno enemigo recibes', 'el daño de un aliado a tu lado,', 'y cuenta tu defensa.'] },
+  hands: { name: 'Imposición de manos', target: 'allyAny', range: 'hands_range', text: () => [`Cura ${tune.hands_heal} a un aliado a ${tune.hands_range} o menos`, '(o a ti). Levanta a un derribado', `sin Tónico, con ${tune.hands_revive_hp} de vida.`] },
+  aimed: { name: 'Tiro certero', target: 'enemy', text: () => ['Un ataque que ignora la', `cobertura y hace +${tune.aimed_bonus_dmg} de daño.`] },
+  chains: { name: 'Cadenas arcanas', target: 'area', range: 'chains_range', text: () => [`Área 3x3 a la vista, a ${tune.chains_range} o menos:`, `${tune.chains_dmg} de daño, siempre acierta.`, 'No se mueven en su próximo turno.'] },
+  reroll: { name: 'Dedos ligeros', passive: true, text: () => ['Una vez por ronda se repite el', 'primer d20 fallado, tuyo o de un', `aliado a ${tune.reroll_range} o menos.`] },
+  lantern: { name: 'Farol', passive: true, text: () => [`Tu luz llega ${tune.lantern_bonus} casillas más lejos.`, 'Los enemigos dentro de tu luz', 'no reciben cobertura.'] },
+  lockpick: { name: 'Ganzúa', passive: true, text: () => ['Abrir puertas y cofres no te', `cuesta PA, y tus cofres dan`, `${tune.pip_tonics} Tónicos en vez de 1.`] },
 };
+/** A copy of list shuffled by its own seeded generator, so the dungeon's dice are untouched. */
+function seededShuffle(list, s) {
+  const r = () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), s | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const a = list.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a;
+}
 
 const idx = (x, y) => y * N + x;
 const inb = (x, y) => x >= 0 && y >= 0 && x < N && y < N;
@@ -240,7 +257,7 @@ function hstat(h, s) { return tune[`${h.cls}_${s}`]; }
 function estat(e, s) { return tune[`${e.kind}_${s}`]; }
 
 // ---- State ------------------------------------------------------------------------------
-const setup = { count: 2, classes: ['warrior', 'mage', 'healer', 'archer'], corners: CORNER_ROOMS.slice(), row: 0 };
+const setup = { count: 2, corners: CORNER_ROOMS.slice(), row: 0 };
 const cam = { x: 0, y: 0, zoom: 0.8, tx: 0, ty: 0, follow: true };
 let scene, state, ui = [];
 
@@ -252,17 +269,19 @@ function reset() {
     tiles: new Array(N * N).fill(T_WALL), objs: new Array(N * N).fill(null), doorAt: new Int16Array(N * N).fill(-1),
     rooms: [], doors: [], torches: [],
     revealed: new Array(rooms).fill(false), revealT: new Array(rooms).fill(-99), revealFrom: new Array(rooms).fill(null),
-    heroes: [], enemies: [], log: [], pops: [], fx: [], dice: null, slam: [], taunt: null, undo: null,
+    heroes: [], enemies: [], summons: [], log: [], pops: [], fx: [], dice: null, slam: [], undo: null,
     enemyQueue: [], enemyTimer: 0, autoEnd: 0, lock: 0, endTimer: 0, won: false, lost: false,
-    banner: null, shake: 0, acting: null, players: n,
+    banner: null, shake: 0, acting: null, players: n, rerolled: false,
   };
   buildDungeon(players);
+  // The hero deck, shuffled from the seed: player i plays the i-th card drawn
+  const drawn = seededShuffle(HERO_IDS, seed ^ 0x5eed);
   for (let i = 0; i < n; i++) { // each hero on the free floor nearest the table's corner, in their card
-    const r = players[i], cls = setup.classes[i], hp = tune[cls + '_hp'];
+    const r = players[i], cls = drawn[i], hp = tune[cls + '_hp'];
     const [x, y] = cornerCell(r);
     state.heroes.push({ id: 'h' + i, hero: true, player: i, cls, kind: cls, x, y, hp, maxHp: hp,
-      ap: 0, cds: [0, 0], shield: 0, downed: false, tonics: 0, miss: 0, flash: 0, anim: null, face: 1,
-      stats: { dmg: 0, kills: 0, help: 0 } });
+      ap: 0, cds: [0], shield: 0, downed: false, tonics: 0, miss: 0, flash: 0, anim: null, face: 1,
+      guarded: false, stats: { dmg: 0, kills: 0, help: 0 } });
     state.revealed[r] = true;
   }
   populate(players);
@@ -385,8 +404,11 @@ function pop(x, y, txt, color, delay = 0) { state.pops.push({ x, y, txt, color, 
 function unitAt(x, y) {
   for (const h of state.heroes) if (h.x === x && h.y === y) return h;
   for (const e of state.enemies) if (e.alive && e.x === x && e.y === y) return e;
+  for (const s of state.summons) if (s.alive && s.x === x && s.y === y) return s;
   return null;
 }
+/** The hero with this card in play, if any is standing. */
+function heroOf(id) { return state.heroes.find(h => h.cls === id && !h.downed) || null; }
 function passable(x, y) {
   if (!inb(x, y)) return false;
   const t = state.tiles[idx(x, y)];
@@ -427,7 +449,8 @@ function hitChance(a, t, opts = {}) {
     const f = Math.max(0, d - tune.falloff_start) * tune.falloff_per_tile;
     if (f) { ch -= f; parts.push(`distancia −${f}%`); }
   }
-  const cov = opts.ignoreCover ? 0 : coverCount(a, t);
+  let cov = opts.ignoreCover ? 0 : coverCount(a, t);
+  if (cov && a.hero && !t.hero && inLantern(t)) { cov = 0; parts.push('farol de Velia: sin cobertura'); }
   if (cov) { ch -= cov * tune.cover_penalty; parts.push(`cobertura −${cov * tune.cover_penalty}%`); }
   if (a.hero && a.miss) { ch += a.miss * tune.miss_pity; parts.push(`racha de fallos +${a.miss * tune.miss_pity}%`); }
   if (opts.bonus) { ch += opts.bonus; parts.push(`puntería +${opts.bonus}%`); }
@@ -456,7 +479,35 @@ function pathFrom(b, i) {
   for (let c = i; c >= 0; c = b.dist[c] > 0 ? b.prev[c] : -1) out.push([c % N, (c / N) | 0]);
   return out.reverse();
 }
-function heroReach(h) { return bfs(h.x, h.y, hstat(h, 'move'), true, h); }
+function heroReach(h) { return h.cls === 'sombra' ? ghostReach(h) : bfs(h.x, h.y, hstat(h, 'move'), true, h); }
+/** Sombra's reach: walls and closed doors can be walked through but not stopped in. */
+function ghostReach(h) {
+  const max = hstat(h, 'move'), dist = new Int16Array(N * N).fill(-1), prev = new Int16Array(N * N).fill(-1);
+  const q = [idx(h.x, h.y)]; dist[q[0]] = 0;
+  const through = (x, y) => { const t = state.tiles[idx(x, y)]; return t === T_WALL || t === T_DOOR; };
+  for (let qi = 0; qi < q.length; qi++) {
+    const c = q[qi], cx = c % N, cy = (c / N) | 0;
+    if (dist[c] >= max) continue;
+    for (const [dx, dy] of DIR4) {
+      const nx = cx + dx, ny = cy + dy;
+      if (!inb(nx, ny)) continue;
+      const ni = idx(nx, ny);
+      if (dist[ni] >= 0 || !(passable(nx, ny) || through(nx, ny))) continue;
+      const u = unitAt(nx, ny); if (u && u !== h) continue;
+      dist[ni] = dist[c] + 1; prev[ni] = c; q.push(ni);
+    }
+  }
+  const pass = new Uint8Array(N * N); // walked through, never a stop
+  for (let i = 0; i < N * N; i++) if (dist[i] > 0 && !passable(i % N, (i / N) | 0)) pass[i] = 1;
+  return { dist, prev, pass };
+}
+/** Can a hero end a move on cell i of this reach? */
+const canStop = (r, i) => r.dist[i] > 0 && !(r.pass && r.pass[i]);
+/** Is t inside Velia's light, where enemies get no cover? */
+function inLantern(t) {
+  const v = heroOf('velia');
+  return !!v && Math.hypot(v.x - t.x, v.y - t.y) < tune.hero_light_radius + tune.lantern_bonus;
+}
 
 // ---- Fog and rooms ------------------------------------------------------------------------
 function revealRoom(r, from) {
@@ -494,9 +545,38 @@ function startHeroTurn(i, snap) {
   const h = state.heroes[i];
   h.ap = tune.ap_per_turn;
   h.cds = h.cds.map(c => Math.max(0, c - 1));
-  state.banner = { text: `Jugador ${h.player + 1} · ${CLASS_INFO[h.cls].name}`, t: 0, color: PLAYER_COLORS[h.player] };
+  state.banner = { text: `Jugador ${h.player + 1} · ${HEROES[h.cls].name}`, t: 0, color: PLAYER_COLORS[h.player] };
   camTo(h.x, h.y, snap);
   events.push({ type: 'turn', hero: h.id, round: state.round });
+  if (h.cls === 'flink') forge(h);
+}
+/** Flink's Forja: a d20 at the start of his turn; on forge_on or more, a shield for the most hurt hero near him. */
+function forge(h) {
+  const roll = heroRoll(h, tune.forge_on), ok = roll >= tune.forge_on;
+  state.dice = { x: h.x, y: h.y, roll, need: tune.forge_on, hit: ok, crit: false, t: -0.3, who: 'hero' };
+  let to = null;
+  if (ok) for (const o of state.heroes) if (!o.downed && cheb(o, h) <= tune.forge_range && (!to || o.hp / o.maxHp < to.hp / to.maxHp)) to = o;
+  if (to) {
+    to.shield += tune.forge_shield; if (to !== h) h.stats.help++;
+    pop(to.x, to.y, `Forja: escudo ${tune.forge_shield}`, '#9fd0ff', 0.6);
+    state.fx.push({ kind: 'ring', a: to, b: to, t: -0.6, life: 0.6 });
+  } else pop(h.x, h.y, 'Forja: nada esta vez', '#c8c8d8', 0.6);
+  events.push({ type: 'forge', hero: h.id, roll, ok });
+  state.lock = 0.9;
+}
+/**
+ * A hero's d20 against need. Mirko's Dedos ligeros: once a round, a miss by him or by a hero
+ * within reroll_range of him is rolled again, and the second roll stands.
+ */
+function heroRoll(h, need) {
+  let roll = rollD20();
+  const m = heroOf('mirko');
+  if (roll < need && m && !state.rerolled && cheb(m, h) <= tune.reroll_range) {
+    state.rerolled = true; roll = rollD20();
+    pop(m.x, m.y, 'Dedos ligeros: ¡otra vez!', '#f08ac8');
+    events.push({ type: 'reroll', by: m.id, for: h.id, roll });
+  }
+  return roll;
 }
 function endHeroTurn() {
   state.mode = null; state.undo = null;
@@ -509,7 +589,21 @@ function startEnemyPhase() {
   const list = state.enemies.filter(awake).sort((a, b) => (a.kind === 'boss') - (b.kind === 'boss') || near(a) - near(b));
   state.enemyQueue = list.map(e => e.id);
   state.enemyTimer = 0.4;
+  for (const h of state.heroes) h.guarded = false;
   state.banner = { text: 'Turno de los enemigos', t: 0, color: '#d8645a' };
+  for (const s of state.summons) if (s.alive) state.enemyTimer += treeSwing(s);
+}
+/** Natwure's tree hits an awake enemy beside it at the end of the heroes' turn. Returns its time. */
+function treeSwing(s) {
+  let e = null;
+  for (const o of state.enemies) if (awake(o) && cheb(o, s) === 1 && (!e || o.hp < e.hp)) e = o;
+  if (!e) return 0;
+  const c = hitChance(s, e), roll = rollD20(), ok = roll >= c.need;
+  state.dice = { x: e.x, y: e.y, roll, need: c.need, hit: ok, crit: false, t: 0, who: 'hero' };
+  if (ok) { damage(e, tune.tree_atk, heroOf('natwure') || null, 0.3); sfx('hit'); } else { pop(e.x, e.y, 'Fallo', '#c8c8d8', 0.3); sfx('miss'); }
+  pop(s.x, s.y, '¡Rama!', '#9fe07a');
+  events.push({ type: 'treeSwing', on: e.id, roll, hit: ok });
+  return 1.0;
 }
 function enemyPhase(dt) {
   const fast = down.has('Space') || down.has('KeyF');
@@ -523,7 +617,7 @@ function enemyPhase(dt) {
 }
 function endEnemyPhase() {
   for (const h of state.heroes) h.shield = 0;
-  state.taunt = null; state.acting = null;
+  state.acting = null; state.rerolled = false;
   markSlam();
   state.round++;
   const first = state.heroes.findIndex(h => !h.downed);
@@ -545,6 +639,8 @@ function moveHero(h, path) {
   face(h, { x: end[0], y: end[1] });
   h.anim = { path, t: 0 }; h.x = end[0]; h.y = end[1]; h.ap -= 1;
   sfx('step'); events.push({ type: 'move', hero: h.id, to: end });
+  const r = roomOf(h.x, h.y); // Sombra, through a wall into a face-down card: it turns over
+  if (!state.revealed[r]) { state.undo = null; revealRoom(r, { x: h.x, y: h.y }); }
 }
 function undoMove() {
   const h = activeHero(), u = state.undo;
@@ -553,16 +649,18 @@ function undoMove() {
 }
 function spend(h, n) { h.ap -= n; state.undo = null; }
 const doorNear = (h, d) => d.tiles.some(t => manh(h, t) === 1);
+const openCost = h => h.cls === 'pip' ? 0 : 1; // Pip's Ganzúa: doors and chests are free
 function openDoor(h, d) { // the whole 2x2 doorway opens, and the rooms on both sides show
-  spend(h, 1); d.open = true;
+  spend(h, openCost(h)); d.open = true;
   for (const t of d.tiles) state.tiles[idx(t.x, t.y)] = T_OPEN;
   const c = { x: d.x0 + 0.5, y: d.y0 + 0.5 };
   for (const r of d.rooms) revealRoom(r, c);
   face(h, c); sfx('door'); state.lock = 0.35;
 }
 function openChest(h, t) {
-  spend(h, 1); state.objs[idx(t.x, t.y)] = 'chestOpen'; h.tonics++;
-  pop(t.x, t.y, '+1 Tónico', '#9fe7a8'); log(`J${h.player + 1} encuentra un Tónico.`);
+  const n = h.cls === 'pip' ? tune.pip_tonics : 1;
+  spend(h, openCost(h)); state.objs[idx(t.x, t.y)] = 'chestOpen'; h.tonics += n;
+  pop(t.x, t.y, `+${n} Tónico${n > 1 ? 's' : ''}`, '#9fe7a8'); log(`J${h.player + 1} encuentra ${n > 1 ? n + ' Tónicos' : 'un Tónico'}.`);
   face(h, t); sfx('chest'); state.lock = 0.3;
 }
 function canAttack(h, e) {
@@ -571,13 +669,13 @@ function canAttack(h, e) {
 function rollD20() { return 1 + Math.floor(rng() * 20); }
 function attack(h, e, opts = {}) {
   if (!opts.free) spend(h, 1); else state.undo = null;
-  const c = hitChance(h, e, opts), roll = rollD20(), hitIt = roll >= c.need, crit = hitIt && roll >= tune.crit_on;
+  const c = hitChance(h, e, opts), roll = heroRoll(h, c.need), hitIt = roll >= c.need, crit = hitIt && roll >= tune.crit_on;
   state.dice = { x: e.x, y: e.y, roll, need: c.need, hit: hitIt, crit, t: 0, who: 'hero' };
   face(h, e); sfx('dice');
-  if (cheb(h, e) > 1) state.fx.push({ kind: h.cls === 'mage' ? 'bolt' : 'arrow', a: { x: h.x, y: h.y }, b: { x: e.x, y: e.y }, t: 0, life: 0.3 });
+  if (cheb(h, e) > 1) state.fx.push({ kind: ['morwen', 'natwure', 'orla'].includes(h.cls) ? 'bolt' : 'arrow', a: { x: h.x, y: h.y }, b: { x: e.x, y: e.y }, t: 0, life: 0.3 });
   if (hitIt) {
     h.miss = 0;
-    let dmg = hstat(h, 'dmg') + (opts.bonusDmg || 0);
+    let dmg = hstat(h, 'atk') + (opts.bonusDmg || 0);
     if (crit) dmg *= 2;
     damage(e, dmg, h, 0.3);
     if (crit) pop(e.x, e.y, '¡Crítico!', '#ffd34a', 0.3);
@@ -589,15 +687,30 @@ function attack(h, e, opts = {}) {
   events.push({ type: 'attack', by: h.id, on: e.id, roll, need: c.need, hit: hitIt });
 }
 function damage(u, dmg, src, delay = 0) {
+  if (u.summon) { // Natwure's tree: its own defence, and it falls at 0
+    if (!u.alive) return;
+    dmg = Math.max(tune.min_damage, dmg - tune.tree_def);
+    u.hp -= dmg; u.flash = 0.25; pop(u.x, u.y, `−${dmg}`, '#ff7a6a', delay);
+    if (u.hp <= 0) { u.hp = 0; u.alive = false; log('El árbol guardián cae.'); events.push({ type: 'treeDown' }); }
+    return;
+  }
   if (u.hero) {
     if (u.downed) return;
+    const g = heroOf('gorm'); // Gorm's Escudo humano: once an enemy turn, he takes a neighbour's hit
+    if (g && g !== u && state.phase === 'enemy' && !g.guarded && cheb(g, u) <= 1) {
+      g.guarded = true; pop(g.x, g.y, `¡Gorm cubre a J${u.player + 1}!`, '#e8a868', delay);
+      events.push({ type: 'guard', by: g.id, for: u.id });
+      damage(g, dmg, src, delay); return;
+    }
+    const def = hstat(u, 'def'); // defence: each point takes 1 off, a hit still does min_damage
+    if (def && dmg > 0) dmg = Math.max(tune.min_damage, dmg - def);
     if (u.shield > 0) { const a = Math.min(u.shield, dmg); u.shield -= a; dmg -= a; if (a) pop(u.x, u.y, `Escudo −${a}`, '#9fd0ff', delay); }
     if (dmg <= 0) return;
     u.hp -= dmg; u.flash = 0.25; pop(u.x, u.y, `−${dmg}`, '#ff7a6a', delay);
     if (u.hp <= 0) {
       u.hp = 0; u.downed = true; u.anim = null;
       pop(u.x, u.y, 'Derribado', '#ff4a4a', delay + 0.3);
-      log(`J${u.player + 1} (${CLASS_INFO[u.cls].name}) ha caído. ¡Un Tónico lo levanta!`);
+      log(`J${u.player + 1} (${HEROES[u.cls].short}) ha caído. ¡Un Tónico lo levanta!`);
       sfx('down'); events.push({ type: 'downed', hero: u.id });
     }
     return;
@@ -616,14 +729,15 @@ function damage(u, dmg, src, delay = 0) {
     } else log(`${ENEMY_NAMES[u.kind]} derrotado.`);
   }
 }
-function cardsOf(h) { return CLASS_INFO[h.cls].cards; }
-function pickCard(i) {
-  const h = activeHero(), id = cardsOf(h)[i], card = CARDS[id];
-  if (state.mode && state.mode.card === i) { state.mode = null; return; }
-  if (h.cds[i] > 0) { pop(h.x, h.y, `Recarga: ${h.cds[i]}`, '#c8c8d8'); return; }
+/** The active hero's one ability, as its key in ABILITIES. */
+function abilityOf(h) { return HEROES[h.cls].ability; }
+function pickCard() {
+  const h = activeHero(), id = abilityOf(h), card = ABILITIES[id];
+  if (card.passive) { pop(h.x, h.y, `${card.name}: pasiva, siempre activa`, '#c8c8d8'); return; }
+  if (state.mode && state.mode.card === 0) { state.mode = null; return; }
+  if (h.cds[0] > 0) { pop(h.x, h.y, `Recarga: ${h.cds[0]}`, '#c8c8d8'); return; }
   if (h.ap < tune[id + '_cost']) { pop(h.x, h.y, 'Faltan PA', '#c8c8d8'); return; }
-  if (card.target === 'self') { cast(h, i, h); return; }
-  state.mode = { card: i };
+  state.mode = { card: 0 };
 }
 function toggleTonic() {
   const h = activeHero();
@@ -632,25 +746,29 @@ function toggleTonic() {
   if (h.ap < 1) { pop(h.x, h.y, 'Faltan PA', '#c8c8d8'); return; }
   state.mode = { tonic: true };
 }
-function modeTargets(h, mode) { // the tiles a card or the tonic can be used on
+function modeTargets(h, mode) { // the tiles the ability or the tonic can be used on
   const out = [];
   if (mode.tonic) {
     if (h.hp < h.maxHp) out.push({ x: h.x, y: h.y });
     for (const o of state.heroes) if (o.downed && cheb(o, h) === 1) out.push({ x: o.x, y: o.y });
     return out;
   }
-  const id = cardsOf(h)[mode.card], card = CARDS[id];
+  const card = ABILITIES[abilityOf(h)];
   const range = card.range ? tune[card.range] : 0;
-  if (card.target === 'enemyAdj') { for (const e of state.enemies) if (awake(e) && cheb(h, e) === 1 && los(h, e)) out.push({ x: e.x, y: e.y }); }
-  else if (card.target === 'enemy') { for (const e of state.enemies) if (canAttack(h, e)) out.push({ x: e.x, y: e.y }); }
-  else if (card.target === 'ally') { for (const o of state.heroes) if (!o.downed && cheb(o, h) <= range) out.push({ x: o.x, y: o.y }); }
-  else {
+  if (card.target === 'enemy') { for (const e of state.enemies) if (canAttack(h, e)) out.push({ x: e.x, y: e.y }); }
+  else if (card.target === 'allyAny') {
+    for (const o of state.heroes) if (cheb(o, h) <= range && (o.downed || o.hp < o.maxHp)) out.push({ x: o.x, y: o.y });
+  } else if (card.target === 'adj') {
+    for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) {
+      const x = h.x + dx, y = h.y + dy;
+      if (passable(x, y) && !unitAt(x, y) && tileSeen(x, y)) out.push({ x, y });
+    }
+  } else { // area: any seen floor in range and in sight
     for (let y = h.y - range; y <= h.y + range; y++) for (let x = h.x - range; x <= h.x + range; x++) {
       if (!inb(x, y) || !tileSeen(x, y)) continue;
       const t = state.tiles[idx(x, y)];
       if (t !== T_FLOOR && t !== T_OPEN) continue;
       if (!los(h, { x, y })) continue;
-      if (card.target === 'tile' && (!passable(x, y) || unitAt(x, y))) continue;
       out.push({ x, y });
     }
   }
@@ -672,75 +790,56 @@ function useMode(h, t) {
     state.fx.push({ kind: 'heal', a: t, b: t, t: 0, life: 0.6 }); sfx('heal'); state.lock = 0.4;
     return;
   }
-  cast(h, state.mode.card, t);
+  cast(h, t);
 }
-function cast(h, i, t) {
-  const id = cardsOf(h)[i];
-  spend(h, tune[id + '_cost']); h.cds[i] = tune[id + '_cd']; state.mode = null;
+function cast(h, t) {
+  const id = abilityOf(h);
+  spend(h, tune[id + '_cost']); h.cds[0] = tune[id + '_cd']; state.mode = null;
   const target = unitAt(t.x, t.y);
   sfx('card'); state.lock = 0.45; face(h, t);
   events.push({ type: 'card', hero: h.id, card: id });
-  log(`J${h.player + 1} usa ${CARDS[id].name}.`);
+  log(`J${h.player + 1} usa ${ABILITIES[id].name}.`);
   switch (id) {
-    case 'charge': {
-      const e = target; let dmg = tune.charge_dmg;
-      if (e.kind !== 'boss') {
-        const dx = Math.sign(e.x - h.x), dy = Math.sign(e.y - h.y), path = [[e.x, e.y]];
-        let crashed = null;
-        for (let s = 0; s < tune.charge_push; s++) {
-          const nx = e.x + dx, ny = e.y + dy, other = unitAt(nx, ny);
-          if (!passable(nx, ny) || other) { crashed = other || 'wall'; break; }
-          e.x = nx; e.y = ny; path.push([nx, ny]);
-        }
-        if (path.length > 1) e.anim = { path, t: 0, speed: 12 };
-        if (crashed) {
-          dmg += tune.charge_crash; pop(e.x, e.y, '¡Choque!', '#ffb36a', 0.2);
-          if (crashed !== 'wall' && !crashed.hero) damage(crashed, tune.charge_crash_other, h, 0.25);
-        }
+    case 'tree': { // one tree a hero: a new one takes the old one's place
+      for (const s of state.summons) if (s.owner === h.id) s.alive = false;
+      state.summons.push({ id: 's' + state.summons.length, summon: true, hero: false, kind: 'tree', owner: h.id,
+        x: t.x, y: t.y, hp: tune.tree_hp, maxHp: tune.tree_hp, alive: true, flash: 0, anim: null, face: 1 });
+      pop(t.x, t.y, '¡Árbol guardián!', '#9fe07a'); state.fx.push({ kind: 'heal', a: t, b: t, t: 0, life: 0.6 });
+      break;
+    }
+    case 'hands': {
+      if (target.downed) {
+        target.downed = false; target.hp = Math.min(target.maxHp, tune.hands_revive_hp);
+        pop(t.x, t.y, '¡En pie!', '#9fe7a8'); log(`J${h.player + 1} levanta a J${target.player + 1} sin Tónico.`);
+        events.push({ type: 'revive', by: h.id, hero: target.id });
+      } else {
+        const a = Math.min(tune.hands_heal, target.maxHp - target.hp); target.hp += a;
+        pop(t.x, t.y, `+${a}`, '#9fe7a8');
       }
-      damage(e, dmg, h, 0.2); sfx('hit');
-      break;
-    }
-    case 'shout':
-      h.shield += tune.shout_shield; state.taunt = { hero: h.id };
-      pop(h.x, h.y, `¡A mí! Escudo ${tune.shout_shield}`, '#9fd0ff'); state.fx.push({ kind: 'ring', a: h, b: h, t: 0, life: 0.6 });
-      break;
-    case 'fireball': case 'volley': {
-      const dmg = id === 'fireball' ? tune.fireball_dmg : tune.volley_dmg;
-      state.fx.push({ kind: id === 'fireball' ? 'bolt' : 'arrow', a: { x: h.x, y: h.y }, b: { x: t.x, y: t.y }, t: 0, life: 0.3 });
-      state.fx.push({ kind: id === 'fireball' ? 'boom' : 'rain', a: t, b: t, t: -0.25, life: 0.7 });
-      for (const e of state.enemies.slice()) if (awake(e) && cheb(e, t) <= 1) damage(e, dmg, h, 0.3);
-      if (id === 'fireball') { sfx('fire'); state.shake = 0.2; }
-      break;
-    }
-    case 'blink':
-      state.fx.push({ kind: 'spark', a: { x: h.x, y: h.y }, b: { x: h.x, y: h.y }, t: 0, life: 0.5 });
-      h.x = t.x; h.y = t.y; h.anim = null;
-      state.fx.push({ kind: 'spark', a: t, b: t, t: 0, life: 0.5 });
-      break;
-    case 'heal': {
-      const a = Math.min(tune.heal_amount, target.maxHp - target.hp); target.hp += a;
       if (target !== h) h.stats.help++;
-      pop(t.x, t.y, `+${a}`, '#9fe7a8'); state.fx.push({ kind: 'heal', a: t, b: t, t: 0, life: 0.6 }); sfx('heal');
+      state.fx.push({ kind: 'heal', a: t, b: t, t: 0, life: 0.6 }); sfx('heal');
       break;
     }
-    case 'ward':
-      target.shield += tune.ward_shield; if (target !== h) h.stats.help++;
-      pop(t.x, t.y, `Escudo ${tune.ward_shield}`, '#9fd0ff'); state.fx.push({ kind: 'ring', a: t, b: t, t: 0, life: 0.6 });
-      break;
     case 'aimed':
-      attack(h, target, { ignoreCover: true, bonus: tune.aimed_bonus_hit, bonusDmg: tune.aimed_bonus_dmg, free: true });
+      attack(h, target, { ignoreCover: true, bonusDmg: tune.aimed_bonus_dmg, free: true });
       break;
+    case 'chains': {
+      state.fx.push({ kind: 'bolt', a: { x: h.x, y: h.y }, b: { x: t.x, y: t.y }, t: 0, life: 0.3 });
+      state.fx.push({ kind: 'chains', a: t, b: t, t: -0.25, life: 0.8 });
+      for (const e of state.enemies.slice()) if (awake(e) && cheb(e, t) <= 1) {
+        damage(e, tune.chains_dmg, h, 0.3);
+        if (e.alive) { e.rooted = true; pop(e.x, e.y, 'Encadenado', '#c8a8f0', 0.6); }
+      }
+      sfx('fire'); state.shake = 0.15;
+      break;
+    }
   }
 }
 
 // ---- Enemies ----------------------------------------------------------------------------
 function enemySees(e, h) { return cheb(e, h) <= (e.kind === 'boss' ? tune.boss_sight : tune.enemy_sight) && los(e, h); }
 function chooseTarget(e) {
-  if (state.taunt) {
-    const w = state.heroes.find(h => h.id === state.taunt.hero);
-    if (w && !w.downed && cheb(e, w) <= tune.shout_radius) return w;
-  }
+  for (const s of state.summons) if (s.alive && e.kind !== 'boss' && enemySees(e, s)) return s; // the tree draws them
   let best = null, bd = 1e9;
   for (const h of state.heroes) if (!h.downed && enemySees(e, h)) { const d = cheb(e, h); if (d < bd) { bd = d; best = h; } }
   return best;
@@ -809,6 +908,7 @@ function actEnemy(e) {
     path = planToward(e, { x: w[0], y: w[1] }, tune.patrol_move);
   }
   let dur = 0.15;
+  if (e.rooted) { e.rooted = false; path = null; pop(e.x, e.y, 'Encadenado: no se mueve', '#c8a8f0'); }
   if (path && path.length > 1) {
     const end = path[path.length - 1];
     face(e, { x: end[0], y: end[1] });
@@ -902,7 +1002,7 @@ function dispPos(u) { // where a figure is drawn, part way along its move
   const i = Math.min(p.length - 1, Math.floor(f)), j = Math.min(p.length - 1, i + 1), k = f - Math.floor(f);
   return { x: p[i][0] + (p[j][0] - p[i][0]) * k, y: p[i][1] + (p[j][1] - p[i][1]) * k };
 }
-const FIG_H = { warrior: 58, mage: 62, healer: 54, archer: 50, skeleton: 46, goblin: 36, rat: 20, boss: 82 };
+const FIG_H = { flink: 56, natwure: 60, sombra: 56, gorm: 58, orla: 54, kesh: 50, morwen: 62, mirko: 52, velia: 56, pip: 38, tree: 48, skeleton: 46, goblin: 36, rat: 20, boss: 82 };
 function unitVisible(u) { return u.hero || (awake(u) && fogAlpha(u.x, u.y) < 0.5); }
 function unitBox(u) { // what a click on a figure hits, in world px: its own cell, plus a painted figure's size
   const d = dispPos(u), c = wpos(d.x, d.y), big = u.kind === 'boss';
@@ -912,7 +1012,7 @@ function unitBox(u) { // what a click on a figure hits, in world px: its own cel
 function unitAtScreen(px, py) {
   const w = toWorld(px, py);
   let best = null, bd = -1e9;
-  for (const u of [...state.heroes, ...state.enemies]) {
+  for (const u of [...state.heroes, ...state.enemies, ...state.summons]) {
     if (!u.hero && !u.alive) continue;
     if (!unitVisible(u)) continue;
     const b = unitBox(u);
@@ -926,7 +1026,7 @@ function busy() { return state.lock > 0 || state.heroes.some(h => h.anim) || sta
 function updateAnims(dt) {
   const fast = state.phase === 'enemy' && (down.has('Space') || down.has('KeyF'));
   const d = dt * (fast ? tune.fast_forward : 1);
-  for (const u of [...state.heroes, ...state.enemies]) {
+  for (const u of [...state.heroes, ...state.enemies, ...state.summons]) {
     if (u.anim) { u.anim.t += d; if (u.anim.t * (u.anim.speed || tune.anim_speed) >= u.anim.path.length - 1) u.anim = null; }
     if (u.flash > 0) u.flash -= dt;
   }
@@ -954,8 +1054,7 @@ function heroPhase() {
   if (pressed('Space')) { endHeroTurn(); return; }
   if (pressed('KeyZ')) undoMove();
   if (pressed('KeyT')) toggleTonic();
-  if (pressed('Digit1')) pickCard(0);
-  if (pressed('Digit2')) pickCard(1);
+  if (pressed('Digit1')) pickCard();
   if (activeHero().ap <= 0 && !state.mode) {
     state.autoEnd += STEP;
     if (state.autoEnd > 0.4) endHeroTurn();
@@ -980,7 +1079,7 @@ function boardClick(h, px, py) {
   }
   if (state.objs[idx(t.x, t.y)] === 'chest' && cheb(h, t) === 1) { openChest(h, t); return; }
   const r = heroReach(h), i = idx(t.x, t.y);
-  if (r.dist[i] > 0) moveHero(h, pathFrom(r, i));
+  if (canStop(r, i)) moveHero(h, pathFrom(r, i));
 }
 function uiHit(x, y) { for (let i = ui.length - 1; i >= 0; i--) { const b = ui[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b; } return null; }
 
@@ -1016,50 +1115,114 @@ function glow(x, y, r, color) {
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
 }
 const FIGS = {
-  warrior() {
-    P([-9, -31, 9, -31, 13, -3, -12, -3], '#8e2a24');
-    P([-8, -13, -2, -13, -2, 0, -9, 0], '#3a3f4d'); P([2, -13, 8, -13, 9, 0, 2, 0], '#3a3f4d');
-    P([-11, -31, 11, -31, 9, -12, -9, -12], '#aab3c4');
-    P([-9, -16, 9, -16, 9, -12, -9, -12], '#5a4030', 1.5);
-    El(0, -41, 8, 7, '#c5ccd8'); P([-8, -42, 8, -42, 7, -32, -7, -32], '#c5ccd8');
-    ctx.fillStyle = INK; ctx.fillRect(-6, -39, 12, 2.5);
-    P([-2, -47, 2, -47, 6, -57, 0, -52, -5, -58], '#c0392b', 1.5);
-    Ln(11, -14, 18, -42, '#e3e7ee', 3); Ln(7, -18, 15, -14, '#c9a43a', 2.5);
-    P([-19, -31, -5, -31, -5, -17, -12, -7, -19, -17], '#a8322a');
-    P([-16, -28, -8, -28, -8, -18, -12, -12, -16, -18], '#c0453a', 1);
-    C(-12, -22, 2.3, '#e0b84a', 1);
+  // The 10 heroes of the deck, each with its reserved colour and one silhouette trait (art bible §3)
+  flink() { // the blacksmith: apron and a big hammer glowing from the forge
+    P([-8, -12, -2, -12, -2, 0, -9, 0], '#3a2e26'); P([2, -12, 8, -12, 9, 0, 2, 0], '#3a2e26');
+    P([-11, -31, 11, -31, 12, -9, -12, -9], '#7a4e2a');
+    P([-8, -28, 8, -28, 10, -5, -10, -5], '#4a3020');
+    C(0, -36, 6.5, '#e5c49c');
+    P([-6, -36, 6, -36, 3, -26, 0, -24, -3, -26], '#c8561a', 1.5);
+    P([-7, -42, 7, -42, 6, -38, -6, -38], '#ff7a1f', 1.5);
+    Ln(13, -6, 15, -36, '#6b4a2c', 3);
+    glow(15, -39, 15, 'rgba(255,122,31,0.5)');
+    P([7, -45, 23, -45, 23, -33, 7, -33], '#5a5f6a'); P([7, -45, 23, -45, 23, -42, 7, -42], '#ff9a4a', 0);
   },
-  mage() {
-    P([-7, -30, 7, -30, 13, 0, -13, 0], '#3346a0');
-    P([-13, 0, 13, 0, 12, -4, -12, -4], '#d8b24a', 1.5);
-    P([-2.5, -28, 2.5, -28, 2, -6, -2, -6], '#25307a', 1);
-    C(0, -33, 5, '#e5c49c'); P([-4, -31, 4, -31, 0, -22], '#ececf2', 1.5);
-    El(0, -37, 11, 3.5, '#24307a'); P([-7, -37, 7, -37, 5, -49, 12, -61, 0, -48], '#2a3888');
-    C(3, -45, 1.3, '#f2d36a', 0); C(-1, -40, 1.1, '#f2d36a', 0);
-    Ln(12, 0, 12, -45, '#6b4a2c', 2.5);
-    glow(12, -48, 16, 'rgba(120,220,255,0.55)'); C(12, -48, 4.5, '#8fe8ff', 1.5);
+  natwure() { // the druid: branch antlers and a leafy staff
+    Ln(-13, 0, -13, -44, '#6b4a2c', 2.5);
+    P([-13, -44, -20, -50, -14, -48], '#5fd13a', 1); P([-13, -44, -6, -52, -12, -47], '#5fd13a', 1); P([-13, -40, -19, -38, -14, -42], '#5fd13a', 1);
+    glow(-13, -46, 12, 'rgba(95,209,58,0.4)');
+    P([-8, -30, 8, -30, 13, 0, -13, 0], '#3f8f2a');
+    P([-13, 0, 13, 0, 12, -4, -12, -4], '#5fd13a', 1.5);
+    C(0, -35, 5.5, '#c9a27e');
+    Ln(-3, -40, -9, -53, '#7a5532', 2); Ln(-6, -47, -13, -49, '#7a5532', 1.5);
+    Ln(3, -40, 9, -53, '#7a5532', 2); Ln(6, -47, 13, -49, '#7a5532', 1.5);
+    P([-9, -53, -13, -57, -7, -56], '#5fd13a', 1); P([9, -53, 13, -57, 7, -56], '#5fd13a', 1);
   },
-  healer() {
-    Ln(-13, 0, -13, -41, '#7a5532', 2.5);
-    P([-13, -41, -19, -48, -13, -46], '#5fbf6a', 1); P([-13, -41, -7, -49, -12, -45], '#5fbf6a', 1);
-    glow(-13, -45, 12, 'rgba(250,230,140,0.45)'); C(-13, -44, 2.5, '#f4e27a', 1);
-    P([-8, -30, 8, -30, 12, 0, -12, 0], '#e6dcc2');
-    P([-2, -30, 2, -30, 2.5, 0, -2.5, 0], '#d4a943', 1);
-    C(0, -35, 7.5, '#d5c7a2'); C(0, -33.5, 4.2, '#e5c49c', 1.5);
-    glow(0, -47, 14, 'rgba(255,220,120,0.35)');
+  sombra() { // the ghost: a ragged hooded cloak, see-through, with cold eyes
+    ctx.globalAlpha *= 0.85;
+    P([-8, -38, 8, -38, 13, -6, 9, 0, 5, -5, 0, 1, -5, -5, -9, 0, -13, -6], '#5a3a8c');
+    P([-10, -36, 0, -55, 10, -36, 7, -29, -7, -29], '#46307a');
+    El(0, -37, 5, 6, '#140c22', 1);
+    glow(0, -38, 11, 'rgba(127,212,255,0.55)');
+    C(-2.2, -38, 1.4, '#7fd4ff', 0); C(2.2, -38, 1.4, '#7fd4ff', 0);
+    Ln(10, -16, 16, -28, '#cfe6ff', 2);
+  },
+  gorm() { // the wall: stocky, a tower shield in front
+    P([-9, -12, -2, -12, -2, 0, -10, 0], '#3a2e26'); P([2, -12, 9, -12, 10, 0, 2, 0], '#3a2e26');
+    P([-13, -34, 13, -34, 15, -10, -15, -10], '#c8763a');
+    P([-14, -14, 14, -14, 14, -10, -14, -10], '#4a2a1a', 1.5);
+    El(0, -42, 9, 8, '#a86030'); P([-9, -43, 9, -43, 8, -34, -8, -34], '#a86030');
+    ctx.fillStyle = INK; ctx.fillRect(-6, -41, 12, 2.5);
+    P([-3, -50, 3, -50, 0, -57], '#e8d0a0', 1.5);
+    Ln(13, -12, 17, -38, '#7a5532', 3); P([12, -38, 25, -43, 25, -31, 12, -34], '#9aa3b4');
+    P([-23, -39, -5, -39, -5, -7, -14, 0, -23, -7], '#8a4a22');
+    P([-20, -36, -8, -36, -8, -9, -14, -3, -20, -9], '#c8763a', 1);
+    C(-14, -21, 3, '#e8c070', 1);
+  },
+  orla() { // the healer: a silver robe, a halo and a staff of light
+    Ln(-13, 0, -13, -41, '#7a6a5a', 2.5);
+    P([-13, -41, -19, -48, -13, -46], '#e8eef6', 1); P([-13, -41, -7, -49, -12, -45], '#e8eef6', 1);
+    glow(-13, -45, 12, 'rgba(230,240,255,0.45)'); C(-13, -44, 2.5, '#ffffff', 1);
+    P([-8, -30, 8, -30, 12, 0, -12, 0], '#c9d1dc');
+    P([-2, -30, 2, -30, 2.5, 0, -2.5, 0], '#8a93a6', 1);
+    C(0, -35, 7.5, '#aab3c4'); C(0, -33.5, 4.2, '#e5c49c', 1.5);
+    glow(0, -47, 14, 'rgba(230,240,255,0.35)');
     ctx.lineWidth = 4.5; ctx.strokeStyle = INK; ctx.beginPath(); ctx.ellipse(0, -47, 8.5, 2.8, 0, 0, Math.PI * 2); ctx.stroke();
-    ctx.lineWidth = 2.2; ctx.strokeStyle = '#f7d96e'; ctx.stroke();
+    ctx.lineWidth = 2.2; ctx.strokeStyle = '#f2f6ff'; ctx.stroke();
   },
-  archer() {
+  kesh() { // the huntress: a long bow and a quiver
     P([5, -34, 10, -36, 13, -17, 8, -15], '#7a4e2a', 1.5);
     Ln(7, -35, 6, -42, '#e8e2d0', 1.2); Ln(9, -36, 9.5, -43, '#e8e2d0', 1.2);
-    P([4, -42, 8, -42, 6, -46], '#c0392b', 1); P([7.5, -43, 11.5, -43, 9.5, -47], '#c0392b', 1);
+    P([4, -42, 8, -42, 6, -46], '#2ec4b6', 1); P([7.5, -43, 11.5, -43, 9.5, -47], '#2ec4b6', 1);
     P([-7, -12, -2, -12, -2, 0, -8, 0], '#5a3d24'); P([2, -12, 7, -12, 8, 0, 2, 0], '#5a3d24');
-    P([-9, -31, 9, -31, 9, -10, -9, -10], '#3f7a3a');
+    P([-9, -31, 9, -31, 9, -10, -9, -10], '#2ec4b6');
     P([-9, -15, 9, -15, 9, -12, -9, -12], '#6b4a2c', 1);
-    P([-8, -30, 8, -30, 6, -41, 0, -48, -6, -41], '#2f5f2c'); C(0, -34, 3.8, '#c9a27e', 1.2);
-    Arc(-6, -22, 15, Math.PI * 0.6, Math.PI * 1.4, '#8a5a2b', 3);
-    ctx.strokeStyle = '#e8e2d0'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-10.6, -7.7); ctx.lineTo(-10.6, -36.3); ctx.stroke();
+    P([-8, -30, 8, -30, 6, -41, 0, -48, -6, -41], '#1f8f86'); C(0, -34, 3.8, '#c9a27e', 1.2);
+    Arc(-6, -22, 17, Math.PI * 0.58, Math.PI * 1.42, '#8a5a2b', 3);
+    ctx.strokeStyle = '#e8e2d0'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-10.9, -6); ctx.lineTo(-10.9, -38); ctx.stroke();
+  },
+  morwen() { // the sorceress: a tall pointed hat and a glowing orb
+    P([-7, -30, 7, -30, 13, 0, -13, 0], '#8a5ad0');
+    P([-13, 0, 13, 0, 12, -4, -12, -4], '#d8c0ff', 1.5);
+    P([-2.5, -28, 2.5, -28, 2, -6, -2, -6], '#5a3a90', 1);
+    C(0, -33, 5, '#e5c49c');
+    El(0, -37, 11, 3.5, '#6a3ab0'); P([-7, -37, 7, -37, 5, -49, 12, -62, 0, -48], '#6a3ab0');
+    C(3, -45, 1.3, '#f2d36a', 0); C(-1, -40, 1.1, '#f2d36a', 0);
+    Ln(12, 0, 12, -45, '#6b4a2c', 2.5);
+    glow(12, -48, 16, 'rgba(200,150,255,0.6)'); C(12, -48, 4.5, '#e0c8ff', 1.5);
+  },
+  mirko() { // the gambler: a wide hat with a feather and a die in his hand
+    P([-7, -12, -2, -12, -2, 0, -8, 0], '#2a1a2a'); P([2, -12, 7, -12, 8, 0, 2, 0], '#2a1a2a');
+    P([-9, -30, 9, -30, 11, -6, -11, -6], '#e04ca0');
+    P([-3.5, -30, 3.5, -30, 3, -10, -3, -10], '#2a1a2a', 1);
+    C(0, -35, 5.5, '#e5c49c');
+    P([-7, -40, 7, -40, 6, -50, -6, -50], '#3a1a30'); El(0, -40, 14, 3.5, '#3a1a30');
+    Ln(5, -48, 15, -58, '#e04ca0', 2);
+    P([10, -21, 18, -21, 18, -13, 10, -13], '#f4f0e0', 1.5);
+    C(12.5, -18.5, 1, INK, 0); C(15.5, -15.5, 1, INK, 0); C(14, -17, 1, INK, 0);
+  },
+  velia() { // the lamplighter: a lantern on a pole
+    P([-8, -30, 8, -30, 11, 0, -11, 0], '#6a5a3a');
+    P([-7, -31, 7, -31, 5, -25, -5, -25], '#f2e14a', 1.5);
+    C(0, -36, 5.5, '#e5c49c');
+    P([-6, -39, 6, -39, 7, -33, 5, -36, -5, -36, -7, -33], '#8a4a2a', 1.2);
+    Ln(12, 0, 12, -50, '#6b4a2c', 2.5); Ln(12, -50, 20, -50, '#6b4a2c', 2);
+    glow(20, -43, 24, 'rgba(255,230,120,0.6)');
+    P([17, -48, 23, -48, 24, -38, 16, -38], '#f2e14a');
+  },
+  pip() { // the lockpick: small, a bone-white hood and a ring of keys
+    Ln(-3, -6, -4, 0, '#3a2e26', 2.5); Ln(3, -6, 4, 0, '#3a2e26', 2.5);
+    P([-7, -20, 7, -20, 9, -4, -9, -4], '#5a4a3a');
+    P([-8, -21, 0, -36, 8, -21, 6, -16, -6, -16], '#ece3cc');
+    C(0, -22, 3.8, '#e5c49c', 1.2);
+    Arc(-11, -11, 3.5, 0, Math.PI * 2, '#d8b04a', 1.2); Ln(-11, -7.5, -11, -3, '#d8b04a', 1.2);
+    Ln(8, -12, 15, -17, '#cfd6e0', 1.2);
+  },
+  tree() { // Natwure's guardian tree: a trunk with a face and a round crown
+    P([-9, 0, -4, -4, 4, -4, 9, 0], '#5a3a22', 1.5);
+    P([-4, -2, 4, -2, 3, -22, -3, -22], '#6b4a2c');
+    C(0, -30, 13, '#3f8f2a'); C(-9, -26, 8, '#4fa83a'); C(9, -26, 8, '#4fa83a'); C(0, -39, 8, '#5fd13a');
+    C(-2.5, -12, 1.3, '#ffe14a', 0); C(2.5, -12, 1.3, '#ffe14a', 0);
   },
   skeleton() {
     Ln(-4, -14, -6, 0, '#ddd6c1', 2.5); Ln(4, -14, 6, 0, '#ddd6c1', 2.5);
@@ -1126,7 +1289,7 @@ function loadArt() {
       images[v] = null; const im = new Image(); im.onload = () => { images[v] = im; }; im.src = v;
     }
   };
-  for (const g of ['rooms', 'cards', 'doors', 'props', 'units']) for (const k in (ARTS[g] || {})) add(ARTS[g][k]);
+  for (const g of ['rooms', 'cards', 'doors', 'props', 'units', 'heroes']) for (const k in (ARTS[g] || {})) add(ARTS[g][k]);
 }
 function artImage(group, key, variant = 0) {
   const v = ARTS[group] && ARTS[group][key];
@@ -1407,7 +1570,7 @@ function computeLight() { // one pixel per cell: darkness and fog, drawn smoothe
   light.fill(tune.ambient_light);
   const ls = [];
   for (const t of state.torches) if (state.revealed[t.room]) ls.push([t.lx, t.ly, tune.torch_radius, 0.9 + 0.08 * Math.sin(state.t * 11 + t.x * 3.1), t.room]);
-  for (const h of state.heroes) { const d = dispPos(h); ls.push([d.x, d.y, h.downed ? 2 : tune.hero_light_radius, h.downed ? 0.5 : 0.8, -1]); }
+  for (const h of state.heroes) { const d = dispPos(h); ls.push([d.x, d.y, h.downed ? 2 : tune.hero_light_radius + (h.cls === 'velia' ? tune.lantern_bonus : 0), h.downed ? 0.5 : 0.8, -1]); }
   const b = boss(); if (b && awake(b)) ls.push([b.x, b.y, 3, 0.4, -1]);
   for (const f of state.fx) if (f.kind === 'boom' && f.t > 0) ls.push([f.a.x, f.a.y, 3.5, 1.2 * (1 - f.t / f.life), -1]);
   for (const [lx, ly, r, k, room] of ls) {
@@ -1484,18 +1647,18 @@ function drawUnit(u) {
   if (u.hero || u.hp < u.maxHp || hoverUnit === u || big) {
     const w = big ? 54 : 32;
     ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(fx - w / 2 - 1, top - 1, w + 2, 6);
-    ctx.fillStyle = u.hero ? '#5fd06a' : '#e0503a'; ctx.fillRect(fx - w / 2, top, w * u.hp / u.maxHp, 4);
+    ctx.fillStyle = u.hero || u.summon ? '#5fd06a' : '#e0503a'; ctx.fillRect(fx - w / 2, top, w * u.hp / u.maxHp, 4);
     if (u.shield) { ctx.fillStyle = '#8fc8ff'; ctx.fillRect(fx - w / 2, top - 4, Math.min(w, w * u.shield / u.maxHp), 3); }
   }
-  if (!u.hero && !big) { // patrol: a half-closed eye; chase: a red open eye
+  if (!u.hero && !u.summon && !big) { // patrol: a half-closed eye; chase: a red open eye
     const ey = top - 9, chase = u.state === 'chase';
     El(fx, ey, 7, chase ? 4.5 : 2.2, chase ? '#ffe6e0' : '#9aa6c0', 1.5);
     C(fx, ey, chase ? 2.4 : 1.2, chase ? '#e0302a' : '#3a4050', 0);
   }
 }
-let hoverUnit = null;
+let hoverUnit = null, partyHover = null;
 function visibleUnits() {
-  return [...state.heroes, ...state.enemies.filter(e => e.alive && unitVisible(e))];
+  return [...state.heroes, ...state.enemies.filter(e => e.alive && unitVisible(e)), ...state.summons.filter(s => s.alive)];
 }
 function drawBoard() {
   computeLight();
@@ -1580,14 +1743,14 @@ function drawHighlights() {
   if (state.mode) {
     const ts = modeTargets(h, state.mode);
     for (const t of ts) tileMark(t.x, t.y, 'rgba(240,190,70,0.22)', 'rgba(255,215,110,0.9)');
-    const card = state.mode.card !== undefined ? CARDS[cardsOf(h)[state.mode.card]] : null;
+    const card = state.mode.card !== undefined ? ABILITIES[abilityOf(h)] : null;
     if (card && card.target === 'area' && hoverTile && ts.some(t => t.x === hoverTile.x && t.y === hoverTile.y))
       tileMark(hoverTile.x - 1, hoverTile.y - 1, 'rgba(255,120,40,0.3)', 'rgba(255,160,80,0.95)', 2.5, 3, 3);
     return;
   }
   if (h.ap >= 1) {
     const r = heroReach(h);
-    for (let i = 0; i < N * N; i++) if (r.dist[i] > 0) tileMark(i % N, (i / N) | 0, 'rgba(80,160,255,0.25)', 'rgba(150,205,255,0.75)', 1.2);
+    for (let i = 0; i < N * N; i++) if (canStop(r, i)) tileMark(i % N, (i / N) | 0, 'rgba(80,160,255,0.25)', 'rgba(150,205,255,0.75)', 1.2);
     for (const e of state.enemies) if (canAttack(h, e)) tileMark(e.x, e.y, 'rgba(255,60,50,0.25)', 'rgba(255,90,70,0.95)', 2);
     for (const d of state.doors) if (!d.open && doorNear(h, d)) tileMark(d.x0, d.y0, null, 'rgba(255,215,110,0.95)', 3, 2, 2);
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const x = h.x + dx, y = h.y + dy; if (inb(x, y) && state.objs[idx(x, y)] === 'chest') tileMark(x, y, null, 'rgba(255,215,110,0.95)', 2.5); }
@@ -1627,6 +1790,9 @@ function drawFx() {
       for (let i = 0; i < 12; i++) { const ox = (hash(i, 3) - 0.5) * 160, oy = (hash(3, i) - 0.5) * 160; const y = a.y + oy - 60 * (1 - k); Ln(a.x + ox, y - 10, a.x + ox, y, '#e8dcc0', 1.2); }
     } else if (f.kind === 'heal') {
       for (let i = 0; i < 6; i++) { const ox = Math.sin(i * 2.1) * 14, y = a.y + FEET - 10 - k * 40 - i * 4; P([a.x + ox - 3, y, a.x + ox + 3, y, a.x + ox, y - 5], `rgba(140,240,150,${1 - k})`, 0); }
+    } else if (f.kind === 'chains') {
+      glow(a.x, a.y, 110 * (0.5 + k), `rgba(180,130,255,${0.8 * (1 - k)})`);
+      for (let i = 0; i < 8; i++) { const ang = i * Math.PI / 4 + k; C(a.x + Math.cos(ang) * 60 * (1 - k * 0.4), a.y + Math.sin(ang) * 60 * (1 - k * 0.4), 5, 'rgba(0,0,0,0)', 2); }
     } else if (f.kind === 'ring') {
       ctx.strokeStyle = `rgba(150,210,255,${1 - k})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(a.x, a.y + FEET, 22 + 60 * k, 10 + 30 * k, 0, 0, Math.PI * 2); ctx.stroke();
     } else if (f.kind === 'spark') {
@@ -1685,32 +1851,92 @@ function button(x, y, w, h, label, enabled, act, active = false) {
   text(label, x + w / 2, y + h / 2 + 1, 16, enabled ? '#f0e6d0' : '#a49aa8');
   if (enabled) ui.push({ x, y, w, h, act });
 }
-function drawCard(x, y, w, h, hero, i) {
-  const id = cardsOf(hero)[i], card = CARDS[id], cost = tune[id + '_cost'], cd = hero.cds[i];
-  const ready = cd === 0 && hero.ap >= cost, sel = state.mode && state.mode.card === i;
+/** The active hero's ability on the HUD: active ones are picked by a click or key 1, passive ones only read. */
+function drawCard(x, y, w, h, hero) {
+  const id = abilityOf(hero), card = ABILITIES[id], passive = !!card.passive;
+  const cost = passive ? 0 : tune[id + '_cost'], cd = hero.cds[0];
+  const ready = !passive && cd === 0 && hero.ap >= cost, sel = state.mode && state.mode.card === 0;
   rrect(x, y, w, h, 10);
   ctx.fillStyle = sel ? '#4a3a1c' : '#2a2032'; ctx.fill();
   ctx.strokeStyle = sel ? '#ffd56a' : ready ? '#c9a24a' : '#5a4a50'; ctx.lineWidth = sel ? 3 : 2; ctx.stroke();
-  text(card.name, x + 12, y + 18, 17, '#f4e6c4', 'left', true);
-  for (let k = 0; k < cost; k++) gem(x + w - 16 - k * 14, y + 18, true, 7);
-  card.text().forEach((l, k) => text(l, x + 12, y + 44 + k * 18, 14, '#d6ccbc', 'left'));
-  text(`${i + 1}`, x + w - 12, y + h - 14, 14, '#9a8a70', 'right');
-  if (cd > 0) {
+  ctx.fillStyle = HEROES[hero.cls].color; ctx.fillRect(x + 2, y + 10, 4, h - 20);
+  text(card.name, x + 14, y + 18, 17, '#f4e6c4', 'left', true);
+  if (passive) text('Pasiva', x + w - 12, y + 18, 15, '#b8ae9c', 'right');
+  else for (let k = 0; k < cost; k++) gem(x + w - 16 - k * 14, y + 18, true, 7);
+  card.text().forEach((l, k) => text(l, x + 14, y + 44 + k * 19, 15, '#d6ccbc', 'left'));
+  if (!passive) text('1', x + w - 12, y + h - 14, 14, '#9a8a70', 'right');
+  if (!passive && cd > 0) {
     rrect(x, y, w, h, 10); ctx.fillStyle = 'rgba(8,6,12,0.7)'; ctx.fill();
     text(`Recarga: ${cd} turno${cd > 1 ? 's' : ''}`, x + w / 2, y + h / 2, 17, '#e8d8b8', 'center', true);
   }
-  if (state.phase === 'hero') ui.push({ x, y, w, h, act: () => pickCard(i) });
+  if (state.phase === 'hero' && !passive) ui.push({ x, y, w, h, act: () => pickCard() });
 }
+// ---- The hero card: drawn by code at 330x512 (the deck's 660x1024 halved), scaled to fit ----
+const HCW = 330, HCH = 512;
+/** The back of the hero deck: the painted back from art.js, or a stone stand-in. */
+function heroBack() {
+  const img = artImage('heroes', 'back'); if (img) return img;
+  if (painted.heroBack) return painted.heroBack;
+  const c = canvasOf(HCW, HCH), g = c.getContext('2d');
+  rrp(g, 0, 0, HCW, HCH, 18); g.fillStyle = '#4a2a1a'; g.fill();
+  rrp(g, 14, 14, HCW - 28, HCH - 28, 10); g.fillStyle = '#5c5750'; g.fill();
+  for (let i = 0; i < 40; i++) { g.strokeStyle = 'rgba(30,26,22,0.35)'; g.lineWidth = 1.5; g.beginPath(); const x = 20 + hash(i, 1) * 290, y = 20 + hash(1, i) * 470; g.moveTo(x, y); g.lineTo(x + (hash(i, 2) - 0.5) * 50, y + (hash(2, i) - 0.5) * 50); g.stroke(); }
+  g.strokeStyle = '#8c857a'; g.lineWidth = 9;
+  for (let k = 0; k < 4; k++) { g.beginPath(); g.ellipse(HCW / 2, HCH / 2, 70, 26, k * Math.PI / 4, 0, Math.PI * 2); g.stroke(); }
+  g.beginPath(); g.arc(HCW / 2, HCH / 2, 92, 0, Math.PI * 2); g.stroke();
+  return (painted.heroBack = c);
+}
+/** A hero's card face at (x, y), s times its 330x512 size: name, figure, stats, ability, restriction. */
+function drawHeroCard(id, x, y, s = 1) {
+  const H0 = HEROES[id], ab = ABILITIES[H0.ability];
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 6;
+  rrect(0, 0, HCW, HCH, 18); ctx.fillStyle = '#4a2a1a'; ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.stroke();
+  rrect(10, 10, HCW - 20, HCH - 20, 12); ctx.fillStyle = '#2e2c2a'; ctx.fill();
+  rrect(18, 18, HCW - 36, HCH - 36, 8); ctx.fillStyle = '#e6d2ae'; ctx.fill();
+  rrect(36, 28, HCW - 72, 40, 6); ctx.fillStyle = '#2b1d14'; ctx.fill();
+  ctx.strokeStyle = H0.color; ctx.lineWidth = 2.5; ctx.stroke();
+  text(H0.name, HCW / 2, 49, 22, '#f4e6c4', 'center', true);
+  text(H0.role, HCW / 2, 84, 16, '#5a4030', 'center');
+  rrect(36, 98, HCW - 72, 186, 8); ctx.fillStyle = '#1a1620'; ctx.fill(); ctx.strokeStyle = H0.color; ctx.lineWidth = 2; ctx.stroke();
+  ctx.save(); rrect(36, 98, HCW - 72, 186, 8); ctx.clip();
+  glow(HCW / 2, 200, 120, 'rgba(255,190,110,0.28)');
+  El(HCW / 2, 268, 46, 12, 'rgba(0,0,0,0.5)', 0);
+  drawFigure(id, HCW / 2, 266, 2.6);
+  ctx.restore();
+  const st = [['Vida', hstatId(id, 'hp')], ['Ataque', hstatId(id, 'atk')], ['Defensa', hstatId(id, 'def')],
+    ['Mover', hstatId(id, 'move')], ['Alcance', hstatId(id, 'range')], ['Acierto', hstatId(id, 'hit') + '%']];
+  st.forEach(([k, v], i) => {
+    const bx = 24 + (i % 3) * 96, by = 294 + Math.floor(i / 3) * 40;
+    rrect(bx, by, 90, 34, 5); ctx.fillStyle = 'rgba(43,29,20,0.1)'; ctx.fill(); ctx.strokeStyle = 'rgba(43,29,20,0.45)'; ctx.lineWidth = 1.2; ctx.stroke();
+    text(k, bx + 6, by + 17, 13, '#5a4030', 'left');
+    text(String(v), bx + 85, by + 17, 17, '#2b1d14', 'right', true);
+  });
+  const cost = ab.passive ? 'pasiva' : `${tune[H0.ability + '_cost']} PA · recarga ${tune[H0.ability + '_cd']}`;
+  text(ab.name, 28, 390, 18, '#2b1d14', 'left', true);
+  text(cost, HCW - 28, 390, 14, '#5a4030', 'right');
+  ab.text().forEach((l, k) => text(l, 28, 414 + k * 19, 15, '#3a2a1c', 'left'));
+  if (H0.no) {
+    C(36, 478, 8, '#e6d2ae', 0); ctx.strokeStyle = '#7a1c1c'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(36, 478, 7, 0, Math.PI * 2); ctx.moveTo(31, 473); ctx.lineTo(41, 483); ctx.stroke();
+    text(H0.no, 50, 478, 15, '#7a1c1c', 'left', true);
+  }
+  ctx.restore();
+}
+/** A stat of a hero card by its id (config.js <id>_<stat>). */
+function hstatId(id, s) { return tune[`${id}_${s}`]; }
 function drawHUD() {
   const h = activeHero();
   // Turn and AP
   panel(12, 12, 440, 70);
   if (state.phase === 'hero') {
     C(32, 34, 8, PLAYER_COLORS[h.player], 2);
-    text(`Ronda ${state.round} · Jugador ${h.player + 1} · ${CLASS_INFO[h.cls].name}`, 48, 34, 19, '#f4e6c4', 'left', true);
+    text(`Ronda ${state.round} · Jugador ${h.player + 1} · ${HEROES[h.cls].short}`, 48, 34, 19, '#f4e6c4', 'left', true);
     text('PA', 30, 62, 15, '#d6ccbc', 'left');
     for (let k = 0; k < tune.ap_per_turn; k++) gem(64 + k * 20, 62, k < h.ap);
-    text(`Vida ${h.hp}/${h.maxHp}${h.shield ? ` · Escudo ${h.shield}` : ''}`, 64 + tune.ap_per_turn * 20 + 10, 62, 15, '#d6ccbc', 'left');
+    text(`Vida ${h.hp}/${h.maxHp}${hstat(h, 'def') ? ` · Def ${hstat(h, 'def')}` : ''}${h.shield ? ` · Escudo ${h.shield}` : ''}`, 64 + tune.ap_per_turn * 20 + 10, 62, 15, '#d6ccbc', 'left');
   } else {
     text(`Ronda ${state.round} · Turno de los enemigos`, 28, 34, 19, '#ff9a8a', 'left', true);
     text('Mantén Espacio o F para acelerar', 28, 62, 15, '#d6ccbc', 'left');
@@ -1728,12 +1954,15 @@ function drawHUD() {
   // Party
   const py = 92;
   panel(12, py, 250, 12 + state.heroes.length * 50);
+  let shown = null; // the plate under the mouse shows its full card (art bible §7)
   state.heroes.forEach((o, k) => {
     const y = py + 8 + k * 50;
     if (o === h && state.phase === 'hero') { rrect(18, y, 238, 46, 6); ctx.fillStyle = 'rgba(255,215,110,0.12)'; ctx.fill(); }
+    ctx.fillStyle = HEROES[o.cls].color; ctx.fillRect(14, y + 6, 4, 34);
+    if (mouse.x >= 12 && mouse.x <= 262 && mouse.y >= y && mouse.y < y + 50) shown = o;
     ctx.save(); if (o.downed) ctx.filter = 'grayscale(0.9) brightness(0.6)'; drawFigure(o.cls, 40, y + 42, 0.62); ctx.restore();
     C(62, y + 12, 5, PLAYER_COLORS[o.player], 1.5);
-    text(`J${o.player + 1} ${CLASS_INFO[o.cls].name}`, 72, y + 13, 15, o.downed ? '#ff8a7a' : '#f0e6d0', 'left', true);
+    text(`J${o.player + 1} ${HEROES[o.cls].short}`, 72, y + 13, 15, o.downed ? '#ff8a7a' : '#f0e6d0', 'left', true);
     if (o.downed) text('Derribado: ¡un Tónico!', 62, y + 33, 14, '#ff8a7a', 'left');
     else {
       ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(62, y + 28, 110, 9);
@@ -1742,11 +1971,13 @@ function drawHUD() {
     }
     flask(228, y + 18); text(`${o.tonics}`, 244, y + 14, 14, '#d6ccbc', 'center');
   });
-  // Cards and buttons
+  partyHover = shown;
+  if (shown) { drawHeroCard(shown.cls, 272, py, 0.8); text('Su carta', 272 + HCW * 0.4, py + HCH * 0.8 + 14, 14, '#b8ae9c'); }
+  // The ability and buttons
   if (state.phase === 'hero') {
-    const cw = 214, ch = 116, cy = H - ch - 12, cx = W / 2 - cw - 60;
-    drawCard(cx, cy, cw, ch, h, 0); drawCard(cx + cw + 10, cy, cw, ch, h, 1);
-    const bx = cx + 2 * cw + 22, bw = 210;
+    const cw = 330, ch = 116, cy = H - ch - 12, cx = W / 2 - 290;
+    drawCard(cx, cy, cw, ch, h);
+    const bx = cx + cw + 12, bw = 210;
     const canTonic = h.tonics > 0 && h.ap >= 1;
     button(bx, cy, bw, 34, `Tónico (T) · ${h.tonics}`, canTonic, toggleTonic, !!(state.mode && state.mode.tonic));
     button(bx, cy + 40, bw, 34, 'Deshacer mover (Z)', !!(state.undo && state.undo.hero === h.id), undoMove);
@@ -1764,7 +1995,7 @@ function drawHUD() {
     ctx.globalAlpha = 1;
   }
   if (state.mode && state.phase === 'hero') {
-    const msg = state.mode.tonic ? 'Tónico: clic en ti (bebes) o en un aliado derribado a tu lado' : `${CARDS[cardsOf(h)[state.mode.card]].name}: elige un objetivo dorado · clic derecho o Esc cancela`;
+    const msg = state.mode.tonic ? 'Tónico: clic en ti (bebes) o en un aliado derribado a tu lado' : `${ABILITIES[abilityOf(h)].name}: elige un objetivo dorado · clic derecho o Esc cancela`;
     textO(msg, W / 2, H - 150, 16, '#ffd56a', 'center', false);
   }
   drawTooltip();
@@ -1795,31 +2026,37 @@ function drawMinimap() { // the 5x5 cards: face up or down, the doors you have s
   } });
 }
 function drawTooltip() {
-  if (state.phase !== 'hero' || busy() || mouse.x < 0 || uiHit(mouse.x, mouse.y)) return;
+  if (state.phase !== 'hero' || busy() || mouse.x < 0 || uiHit(mouse.x, mouse.y) || partyHover) return;
   const h = activeHero(), lines = [];
   const u = hoverUnit, t = hoverTile;
   if (u && !u.hero) {
     lines.push([`${ENEMY_NAMES[u.kind]} · vida ${u.hp}/${u.maxHp}`, '#f4e6c4']);
-    const aimed = state.mode && state.mode.card !== undefined && cardsOf(h)[state.mode.card] === 'aimed';
+    const aimed = state.mode && state.mode.card !== undefined && abilityOf(h) === 'aimed';
     if (state.mode && !aimed) { /* card targeting: the gold tiles say it */ }
     else if (canAttack(h, u)) {
-      const o = aimed ? { ignoreCover: true, bonus: tune.aimed_bonus_hit } : {};
-      const c = hitChance(h, u, o), dmg = hstat(h, 'dmg') + (aimed ? tune.aimed_bonus_dmg : 0);
+      const o = aimed ? { ignoreCover: true } : {};
+      const c = hitChance(h, u, o), dmg = hstat(h, 'atk') + (aimed ? tune.aimed_bonus_dmg : 0);
       lines.push([`Ataque: ${c.ch}% (${c.need}+ en d20) · ${dmg} daño`, '#ffd56a']);
       if (c.parts.length) lines.push([c.parts.join(' · '), '#d6ccbc']);
     } else lines.push([los(h, u) ? 'Fuera de alcance' : 'Sin línea de visión', '#b8ae9c']);
     if (u.kind === 'boss') lines.push(['Marca un área 3x3 que golpea el turno enemigo siguiente', '#ff9a8a']);
     else {
       const tg = chooseTarget(u);
-      lines.push([u.state === 'patrol' ? (tg ? `Patrulla, pero te verá: irá a por J${tg.player + 1}` : 'Patrulla: aún no os ha visto') : (tg ? `Persigue a J${tg.player + 1}` : 'Os busca donde os vio por última vez'), '#d6ccbc']);
+      const who = tg && (tg.summon ? 'el árbol guardián' : `J${tg.player + 1}`);
+      lines.push([u.state === 'patrol' ? (tg ? `Patrulla, pero te verá: irá a por ${who}` : 'Patrulla: aún no os ha visto') : (tg ? `Persigue a ${who}` : 'Os busca donde os vio por última vez'), '#d6ccbc']);
+      if (u.rooted) lines.push(['Encadenado: no se moverá en su turno', '#c8a8f0']);
     }
+  } else if (u && u.summon) {
+    lines.push([`Árbol guardián · vida ${u.hp}/${u.maxHp} · defensa ${tune.tree_def}`, '#9fe07a']);
+    lines.push(['Los enemigos que lo ven van a por él', '#d6ccbc']);
   } else if (u && u.hero) {
-    lines.push([`J${u.player + 1} ${CLASS_INFO[u.cls].name} · vida ${u.hp}/${u.maxHp}`, '#f4e6c4']);
+    lines.push([`J${u.player + 1} ${HEROES[u.cls].name} · vida ${u.hp}/${u.maxHp}`, '#f4e6c4']);
+    lines.push([`Ataque ${hstat(u, 'atk')} · Defensa ${hstat(u, 'def')} · ${ABILITIES[abilityOf(u)].name}`, '#d6ccbc']);
   } else if (t && inb(t.x, t.y) && tileSeen(t.x, t.y)) {
     const i = idx(t.x, t.y);
     if (state.slam.some(s => cheb(s, t) <= 1)) lines.push([`El Carcelero golpeará aquí: ${tune.boss_slam_dmg} daño`, '#ff9a8a']);
-    if (state.tiles[i] === T_DOOR) lines.push([doorNear(h, state.doors[state.doorAt[i]]) ? 'Abrir puerta (1 PA)' : 'Puerta: ponte al lado para abrirla', '#f4e6c4']);
-    else if (state.objs[i] === 'chest') lines.push([cheb(h, t) === 1 ? 'Abrir cofre (1 PA): un Tónico' : 'Cofre: ponte al lado', '#f4e6c4']);
+    if (state.tiles[i] === T_DOOR) lines.push([doorNear(h, state.doors[state.doorAt[i]]) ? `Abrir puerta (${openCost(h)} PA)` : 'Puerta: ponte al lado para abrirla', '#f4e6c4']);
+    else if (state.objs[i] === 'chest') lines.push([cheb(h, t) === 1 ? (h.cls === 'pip' ? `Abrir cofre (0 PA): ${tune.pip_tonics} Tónicos` : 'Abrir cofre (1 PA): un Tónico') : 'Cofre: ponte al lado', '#f4e6c4']);
     else if (state.objs[i] === 'pillar') lines.push(['Obstáculo: cobertura (los disparos a través fallan más)', '#d6ccbc']);
   }
   if (!lines.length) return;
@@ -1852,13 +2089,13 @@ const scenes = {
     update(dt) { state.t += dt; },
     draw() {
       backdrop();
-      const kinds = ['warrior', 'mage', 'healer', 'archer', 'skeleton', 'goblin', 'rat', 'boss'];
-      const names = ['Guerrero', 'Mago', 'Curandero', 'Arquero', 'Esqueleto', 'Arquero goblin', 'Rata de cripta', 'El Carcelero'];
+      const kinds = [...HERO_IDS, 'tree', 'skeleton', 'goblin', 'rat', 'boss'];
       kinds.forEach((k, i) => {
-        const x = 90 + i * 157, y = 420;
-        El(x, y, k === 'boss' ? 40 : 26, k === 'boss' ? 14 : 10, 'rgba(0,0,0,0.5)', 0);
-        drawFigure(k, x, y, 2, i < 4 ? 1 : -1);
-        textO(names[i], x, y + 50, 18, '#f4e6c4');
+        const row = i < 10 ? 0 : 1, col = row ? i - 10 : i, n = row ? 5 : 10;
+        const x = W / 2 + (col - (n - 1) / 2) * (row ? 200 : 122), y = row ? 600 : 300, s = row ? 1.8 : 1.6;
+        El(x, y, k === 'boss' ? 36 : 22, k === 'boss' ? 12 : 8, 'rgba(0,0,0,0.5)', 0);
+        drawFigure(k, x, y, s, row && k !== 'tree' ? -1 : 1);
+        textO(HEROES[k] ? HEROES[k].short : ENEMY_NAMES[k], x, y + 34, 16, HEROES[k] ? HEROES[k].color : '#f4e6c4');
       });
       textO('Antorchas y Dados · figuras', W / 2, 60, 30, '#f2c46a');
     },
@@ -1871,7 +2108,7 @@ const scenes = {
       backdrop();
       textO(TITLE, W / 2, 92, 66, '#f2c46a');
       text('Una mazmorra a oscuras, de 1 a 4 héroes en la misma pantalla', W / 2, 146, 20, '#d6ccbc');
-      ['warrior', 'mage', 'healer', 'archer'].forEach((k, i) => drawFigure(k, W / 2 - 240 + i * 160, 330, 2.2, i < 2 ? 1 : -1));
+      ['flink', 'natwure', 'sombra', 'gorm', 'velia'].forEach((k, i) => drawFigure(k, W / 2 - 320 + i * 160, 330, 2.2, i < 2 ? 1 : -1));
       panel(W / 2 - 440, 392, 880, 226, '#6a5a3a', 'rgba(10,8,14,0.82)');
       CONTROLS.forEach((c, i) => text(c, W / 2, 420 + i * 34, 17, '#e0d6c4'));
       textO('Enter o clic para empezar', W / 2, H - 56, 26, '#ffffff');
@@ -1889,7 +2126,7 @@ const scenes = {
       if (turn && setup.row > 0) changeCorner(setup.row - 1, turn);
       for (let k = 1; k <= 4; k++) if (pressed('Digit' + k)) { setup.count = k; setup.row = Math.min(setup.row, k); fixCorners(); }
       if (pressed('Escape')) scene = 'title';
-      if (pressed('Enter') || pressed('Space')) startGame();
+      if (pressed('Enter') || pressed('Space')) startGame(true);
     },
     draw() {
       backdrop();
@@ -1904,20 +2141,62 @@ const scenes = {
       for (let i = 0; i < setup.count; i++) {
         const y = rowY(i + 1);
         if (setup.row === i + 1) { rrect(W / 2 - 340, y - 36, 680, 72, 8); ctx.fillStyle = 'rgba(255,215,110,0.12)'; ctx.fill(); }
-        C(W / 2 - 300, y - 12, 10, PLAYER_COLORS[i], 2);
-        text(`Jugador ${i + 1}`, W / 2 - 280, y - 12, 22, '#f4e6c4', 'left', true);
-        smallArrow(W / 2 - 290, y + 20, -1, () => changeCorner(i, -1));
-        text(`esquina ${CORNER_NAMES[setup.corners[i]]}`, W / 2 - 200, y + 20, 15, '#e8d6a8', 'center');
-        smallArrow(W / 2 - 110, y + 20, 1, () => changeCorner(i, 1));
-        arrowBtn(W / 2 + 40, y, -1, () => changeSetup(i + 1, -1));
-        drawFigure(setup.classes[i], W / 2 + 100, y + 28, 0.95);
-        text(CLASS_INFO[setup.classes[i]].name, W / 2 + 186, y, 22, '#ffffff', 'center', true);
-        arrowBtn(W / 2 + 270, y, 1, () => changeSetup(i + 1, 1));
+        C(W / 2 - 300, y, 10, PLAYER_COLORS[i], 2);
+        text(`Jugador ${i + 1}`, W / 2 - 280, y, 22, '#f4e6c4', 'left', true);
+        arrowBtn(W / 2 - 100, y, -1, () => changeCorner(i, -1));
+        text(`esquina ${CORNER_NAMES[setup.corners[i]]}`, W / 2 + 10, y, 18, '#e8d6a8', 'center');
+        arrowBtn(W / 2 + 120, y, 1, () => changeCorner(i, 1));
+        ctx.drawImage(heroBack(), W / 2 + 190, y - 30, 39, 60);
+        text('Héroe: del mazo', W / 2 + 240, y, 16, '#b8ae9c', 'left');
       }
       drawCornerPicker(W / 2 + 380, 112);
       const by = 112 + 120 + setup.count * 76 + 20;
-      button(W / 2 - 130, by, 260, 48, 'Entrar en la mazmorra (Enter)', true, startGame);
-      text('Flechas: elegir y cambiar la clase · Q / E: esquina · 1-4: número de jugadores · Esc: volver', W / 2, by + 74, 16, '#b8ae9c');
+      button(W / 2 - 130, by, 260, 48, 'Robar héroes (Enter)', true, () => startGame(true));
+      text('Flechas: elegir fila y cambiar · Q / E: esquina · 1-4: jugadores · Esc: volver · el héroe se roba al entrar', W / 2, by + 74, 16, '#b8ae9c');
+    },
+  },
+  draw: {
+    update(dt) {
+      state.t += dt; drawing.t += dt;
+      for (const c of clicks) { const u = uiHit(c.x, c.y); if (u) u.act(); }
+      if (pressed('Enter') || pressed('Space')) drawNext();
+      if (pressed('Escape')) scene = 'setup';
+    },
+    draw() {
+      backdrop();
+      const n = state.heroes.length, k = drawing.n, done = k >= n;
+      textO(done ? 'Vuestros héroes' : `Jugador ${k + 1}: roba tu héroe`, W / 2, 56, 40, '#f2c46a');
+      // the deck: what is left of the 10, face down
+      const dx = 70, dy = 150, dw = 220, dh = dw * HCH / HCW, left = HERO_IDS.length - k;
+      for (let i = Math.min(left, 6) - 1; i >= 0; i--) ctx.drawImage(heroBack(), dx + i * 3, dy - i * 3, dw, dh);
+      text(`Mazo de héroes · quedan ${left}`, dx + dw / 2, dy + dh + 26, 16, '#d6ccbc');
+      if (!done) {
+        ui.push({ x: dx, y: dy - 18, w: dw + 18, h: dh + 18, act: drawNext });
+        if (Math.sin(state.t * 4) > 0) { rrect(dx - 6, dy - 24, dw + 30, dh + 30, 14); ctx.strokeStyle = 'rgba(255,215,110,0.8)'; ctx.lineWidth = 3; ctx.stroke(); }
+      }
+      // the card just drawn, turning over in the middle
+      if (k > 0) {
+        const h = state.heroes[k - 1], f = clamp(drawing.t / Math.max(0.01, tune.flip_time), 0, 1);
+        const s = 0.98, cw = HCW * s, chh = HCH * s, cx = 360, cy = 104;
+        ctx.save(); ctx.translate(cx + cw / 2, cy); ctx.scale(Math.max(0.02, Math.abs(Math.cos(f * Math.PI))), 1); ctx.translate(-cw / 2, 0);
+        if (f < 0.5) ctx.drawImage(heroBack(), 0, 0, cw, chh); else drawHeroCard(h.cls, 0, 0, s);
+        ctx.restore();
+        if (f >= 1) { C(cx + 10, cy + chh + 22, 8, PLAYER_COLORS[h.player], 2); text(`Jugador ${h.player + 1}`, cx + 26, cy + chh + 22, 18, '#f4e6c4', 'left', true); }
+      }
+      // who has drawn what
+      panel(W - 400, 104, 380, 34 + n * 64, '#8a6a3a', 'rgba(10,8,14,0.86)');
+      state.heroes.forEach((o, i) => {
+        const y = 140 + i * 64;
+        C(W - 376, y, 9, PLAYER_COLORS[o.player], 2);
+        text(`Jugador ${o.player + 1}`, W - 358, y - 12, 18, '#f4e6c4', 'left', true);
+        if (i < k && (i < k - 1 || drawing.t >= tune.flip_time * 0.5)) {
+          drawFigure(o.cls, W - 60, y + 22, 0.7);
+          text(HEROES[o.cls].name, W - 358, y + 14, 17, HEROES[o.cls].color, 'left', true);
+        } else text(i === k ? 'roba ahora' : 'espera su turno', W - 358, y + 14, 16, '#a89e8c', 'left');
+      });
+      const label = done ? 'Entrar en la mazmorra (Enter)' : 'Robar (Enter o clic en el mazo)';
+      button(W - 360, 104 + 34 + n * 64 + 20, 300, 46, label, drawing.t >= tune.flip_time, drawNext);
+      text('El héroe que sale es el que juegas · Esc: volver', W - 210, 104 + 34 + n * 64 + 92, 15, '#b8ae9c');
     },
   },
   play: {
@@ -1943,7 +2222,7 @@ const scenes = {
   over: {
     update(dt) {
       state.t += dt;
-      if (pressed('KeyR') || pressed('Enter') || clicks.length) startGame();
+      if (pressed('KeyR') || pressed('Enter') || clicks.length) startGame(false);
       if (pressed('Escape')) scene = 'title';
     },
     draw() {
@@ -1958,7 +2237,7 @@ const scenes = {
     update(dt) {
       state.t += dt;
       if (pressed('Enter') || clicks.length) { scene = 'title'; reset(); }
-      if (pressed('KeyR')) startGame();
+      if (pressed('KeyR')) startGame(false);
     },
     draw() {
       clear('#05050a'); drawBoard();
@@ -1970,7 +2249,7 @@ const scenes = {
         const y = 250 + k * 64;
         drawFigure(o.cls, W / 2 - 290, y + 24, 0.8);
         C(W / 2 - 250, y - 6, 6, PLAYER_COLORS[o.player], 1.5);
-        text(`Jugador ${o.player + 1} · ${CLASS_INFO[o.cls].name}`, W / 2 - 236, y - 6, 20, '#f4e6c4', 'left', true);
+        text(`Jugador ${o.player + 1} · ${HEROES[o.cls].name}`, W / 2 - 236, y - 6, 20, '#f4e6c4', 'left', true);
         text(`Daño ${o.stats.dmg} · Enemigos en los que participó ${o.stats.kills} · Ayudas ${o.stats.help}`, W / 2 - 250, y + 20, 16, '#d6ccbc', 'left');
       });
       textO('Enter o clic: volver al menú · R: jugar otra vez', W / 2, H - 50, 22, '#ffffff', 'center', false);
@@ -1979,7 +2258,7 @@ const scenes = {
 };
 function changeSetup(row, dir) {
   if (row === 0) { setup.count = clamp(setup.count + dir, 1, 4); setup.row = Math.min(setup.row, setup.count); fixCorners(); }
-  else { const i = row - 1, k = CLASSES.indexOf(setup.classes[i]); setup.classes[i] = CLASSES[(k + dir + 4) % 4]; }
+  else changeCorner(row - 1, dir);
 }
 function fixCorners() { // two players never share a corner: a clash takes the first free one
   for (let i = 0; i < setup.count; i++) if (setup.corners.slice(0, i).includes(setup.corners[i]))
@@ -2006,7 +2285,21 @@ function drawCornerPicker(x, y) { // the table from above: which corner each pla
     if (p >= 0) { C(cx + s / 2, cy + s / 2, 9, PLAYER_COLORS[p], 2); text(`${p + 1}`, cx + s / 2, cy + s / 2 + 1, 12, '#10080a', 'center', true); }
   }
 }
-function startGame() { reset(); scene = 'play'; events.push({ type: 'start', players: setup.count, classes: setup.classes.slice(0, setup.count), corners: setup.corners.slice(0, setup.count) }); }
+/** Deal and go: through the hero draw from the setup screen, straight into play on a retry. */
+function startGame(draw = false) {
+  reset(); scene = draw ? 'draw' : 'play'; drawing.n = 0; drawing.t = 9;
+  events.push({ type: 'start', players: setup.count, heroes: state.heroes.map(h => h.cls), corners: setup.corners.slice(0, setup.count) });
+}
+// ---- The hero draw: each player in turn takes the top card of the deck and turns it over ----
+const drawing = { n: 0, t: 9 }; // cards turned so far; seconds since the last one was drawn
+function drawNext() {
+  if (drawing.t < tune.flip_time) return; // let the card finish turning
+  if (drawing.n < state.heroes.length) {
+    drawing.n++; drawing.t = 0; sfx('flip');
+    const h = state.heroes[drawing.n - 1];
+    events.push({ type: 'draw', player: h.player, hero: h.cls });
+  } else scene = 'play';
+}
 
 // ---- Loop: fixed step, frame time clamped ---------------------------------------------
 function step() {
@@ -2046,7 +2339,7 @@ window.game = {
 loadArt();
 reset();
 scene = params.get('scene') || 'title';
-if (scene === 'play') startGame();
+if (scene === 'play' || scene === 'draw') startGame(scene === 'draw');
 last = clock.now();
 if (params.get('manual') === '1') drawFrame();
 else { requestAnimationFrame(frame); setInterval(timer, 50); }

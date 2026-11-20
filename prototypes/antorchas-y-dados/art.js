@@ -21,8 +21,10 @@
 //                     painted for a north exit like the doors.
 //   props.chest / props.chest_open   1 cell.
 //   units.<kind>      a figure seen from above, square, transparent background, centred on its
-//                     cell and drawn 1.2 cells wide (the boss 2.2). Kinds: warrior, mage, healer,
-//                     archer, skeleton, goblin, rat, boss.
+//                     cell and drawn 1.2 cells wide (the boss 2.2). Kinds: the heroes (flink,
+//                     natwure, sombra, gorm, orla, kesh, morwen, mirko, velia, pip), tree,
+//                     skeleton, goblin, rat, boss.
+//   heroes.back       the back of the hero deck, 660x1024 (any size of that shape).
 window.ART = {
   rooms: {
     // osario: 'assets/rooms/osario.png',
@@ -44,5 +46,8 @@ window.ART = {
   },
   units: {
     // skeleton: 'assets/units/skeleton.png',
+  },
+  heroes: {
+    back: 'assets/heroes/back.webp',
   },
 };

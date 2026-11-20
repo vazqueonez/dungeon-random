@@ -17,62 +17,96 @@ window.CONFIG = {
   min_hit: { value: 10, min: 5, max: 50, step: 5 },            // % floor
   max_hit: { value: 95, min: 50, max: 100, step: 5 },          // % ceiling
 
-  // ---- Heroes ----
-  warrior_hp: { value: 16, min: 6, max: 30, step: 1 },
-  warrior_move: { value: 3, min: 1, max: 6, step: 1 },         // tiles per move action
-  warrior_dmg: { value: 4, min: 1, max: 10, step: 1 },
-  warrior_hit: { value: 80, min: 30, max: 100, step: 5 },      // % base hit
-  warrior_range: { value: 1, min: 1, max: 3, step: 1 },        // tiles
-  mage_hp: { value: 10, min: 4, max: 24, step: 1 },
-  mage_move: { value: 3, min: 1, max: 6, step: 1 },
-  mage_dmg: { value: 3, min: 1, max: 10, step: 1 },
-  mage_hit: { value: 75, min: 30, max: 100, step: 5 },
-  mage_range: { value: 5, min: 1, max: 9, step: 1 },
-  healer_hp: { value: 12, min: 4, max: 24, step: 1 },
-  healer_move: { value: 3, min: 1, max: 6, step: 1 },
-  healer_dmg: { value: 2, min: 1, max: 8, step: 1 },
-  healer_hit: { value: 75, min: 30, max: 100, step: 5 },
-  healer_range: { value: 3, min: 1, max: 7, step: 1 },
-  archer_hp: { value: 11, min: 4, max: 24, step: 1 },
-  archer_move: { value: 4, min: 1, max: 7, step: 1 },
-  archer_dmg: { value: 3, min: 1, max: 10, step: 1 },
-  archer_hit: { value: 80, min: 30, max: 100, step: 5 },
-  archer_range: { value: 6, min: 2, max: 10, step: 1 },
+  // ---- Heroes: the deck of 10 (design/heroes.md). Each player draws one. ----
+  // hp · atk (damage on a hit) · def (each point takes 1 off every hit, min 1) · move (tiles per
+  // move action) · range (tiles) · hit (% base, the d20)
+  min_damage: { value: 1, min: 0, max: 3, step: 1 },           // the least a hit does after defence
+  flink_hp: { value: 14, min: 4, max: 30, step: 1 },           // Flink el herrero
+  flink_atk: { value: 4, min: 1, max: 10, step: 1 },
+  flink_def: { value: 1, min: 0, max: 4, step: 1 },
+  flink_move: { value: 3, min: 1, max: 7, step: 1 },
+  flink_range: { value: 1, min: 1, max: 10, step: 1 },
+  flink_hit: { value: 75, min: 30, max: 100, step: 5 },
+  natwure_hp: { value: 10, min: 4, max: 30, step: 1 },         // Natwure
+  natwure_atk: { value: 2, min: 1, max: 10, step: 1 },
+  natwure_def: { value: 0, min: 0, max: 4, step: 1 },
+  natwure_move: { value: 3, min: 1, max: 7, step: 1 },
+  natwure_range: { value: 4, min: 1, max: 10, step: 1 },
+  natwure_hit: { value: 75, min: 30, max: 100, step: 5 },
+  sombra_hp: { value: 9, min: 4, max: 30, step: 1 },           // Sombra
+  sombra_atk: { value: 3, min: 1, max: 10, step: 1 },
+  sombra_def: { value: 0, min: 0, max: 4, step: 1 },
+  sombra_move: { value: 4, min: 1, max: 7, step: 1 },
+  sombra_range: { value: 3, min: 1, max: 10, step: 1 },
+  sombra_hit: { value: 75, min: 30, max: 100, step: 5 },
+  gorm_hp: { value: 18, min: 4, max: 30, step: 1 },            // Gorm el muro
+  gorm_atk: { value: 3, min: 1, max: 10, step: 1 },
+  gorm_def: { value: 2, min: 0, max: 4, step: 1 },
+  gorm_move: { value: 2, min: 1, max: 7, step: 1 },
+  gorm_range: { value: 1, min: 1, max: 10, step: 1 },
+  gorm_hit: { value: 75, min: 30, max: 100, step: 5 },
+  orla_hp: { value: 11, min: 4, max: 30, step: 1 },            // Hermana Orla
+  orla_atk: { value: 2, min: 1, max: 10, step: 1 },
+  orla_def: { value: 1, min: 0, max: 4, step: 1 },
+  orla_move: { value: 3, min: 1, max: 7, step: 1 },
+  orla_range: { value: 3, min: 1, max: 10, step: 1 },
+  orla_hit: { value: 70, min: 30, max: 100, step: 5 },
+  kesh_hp: { value: 10, min: 4, max: 30, step: 1 },            // Kesh la cazadora
+  kesh_atk: { value: 3, min: 1, max: 10, step: 1 },
+  kesh_def: { value: 0, min: 0, max: 4, step: 1 },
+  kesh_move: { value: 4, min: 1, max: 7, step: 1 },
+  kesh_range: { value: 6, min: 1, max: 10, step: 1 },
+  kesh_hit: { value: 80, min: 30, max: 100, step: 5 },
+  morwen_hp: { value: 9, min: 4, max: 30, step: 1 },           // Morwen la hechicera
+  morwen_atk: { value: 3, min: 1, max: 10, step: 1 },
+  morwen_def: { value: 0, min: 0, max: 4, step: 1 },
+  morwen_move: { value: 3, min: 1, max: 7, step: 1 },
+  morwen_range: { value: 5, min: 1, max: 10, step: 1 },
+  morwen_hit: { value: 75, min: 30, max: 100, step: 5 },
+  mirko_hp: { value: 11, min: 4, max: 30, step: 1 },           // Mirko el tahúr
+  mirko_atk: { value: 3, min: 1, max: 10, step: 1 },
+  mirko_def: { value: 0, min: 0, max: 4, step: 1 },
+  mirko_move: { value: 4, min: 1, max: 7, step: 1 },
+  mirko_range: { value: 1, min: 1, max: 10, step: 1 },
+  mirko_hit: { value: 75, min: 30, max: 100, step: 5 },
+  velia_hp: { value: 12, min: 4, max: 30, step: 1 },           // Velia la farolera
+  velia_atk: { value: 3, min: 1, max: 10, step: 1 },
+  velia_def: { value: 1, min: 0, max: 4, step: 1 },
+  velia_move: { value: 3, min: 1, max: 7, step: 1 },
+  velia_range: { value: 2, min: 1, max: 10, step: 1 },
+  velia_hit: { value: 75, min: 30, max: 100, step: 5 },
+  pip_hp: { value: 10, min: 4, max: 30, step: 1 },             // Pip la ganzúa
+  pip_atk: { value: 2, min: 1, max: 10, step: 1 },
+  pip_def: { value: 0, min: 0, max: 4, step: 1 },
+  pip_move: { value: 4, min: 1, max: 7, step: 1 },
+  pip_range: { value: 1, min: 1, max: 10, step: 1 },
+  pip_hit: { value: 80, min: 30, max: 100, step: 5 },
 
-  // ---- Cards: cost in AP, cooldown in own turns ----
-  charge_cost: { value: 1, min: 1, max: 3, step: 1 },          // Guerrero: Embestida
-  charge_cd: { value: 2, min: 1, max: 6, step: 1 },
-  charge_dmg: { value: 2, min: 0, max: 8, step: 1 },
-  charge_push: { value: 2, min: 1, max: 4, step: 1 },          // tiles pushed
-  charge_crash: { value: 3, min: 0, max: 8, step: 1 },         // extra damage when it hits a wall or unit
-  charge_crash_other: { value: 2, min: 0, max: 8, step: 1 },   // damage to the enemy it is pushed into
-  shout_cost: { value: 2, min: 1, max: 3, step: 1 },           // Guerrero: Grito de guardia
-  shout_cd: { value: 3, min: 1, max: 6, step: 1 },
-  shout_shield: { value: 3, min: 0, max: 10, step: 1 },
-  shout_radius: { value: 5, min: 1, max: 10, step: 1 },        // tiles
-  fireball_cost: { value: 2, min: 1, max: 3, step: 1 },        // Mago: Bola de fuego
-  fireball_cd: { value: 3, min: 1, max: 6, step: 1 },
-  fireball_dmg: { value: 4, min: 1, max: 10, step: 1 },
-  fireball_range: { value: 5, min: 2, max: 9, step: 1 },
-  blink_cost: { value: 1, min: 1, max: 3, step: 1 },           // Mago: Parpadeo
-  blink_cd: { value: 2, min: 1, max: 6, step: 1 },
-  blink_range: { value: 4, min: 2, max: 8, step: 1 },
-  heal_cost: { value: 1, min: 1, max: 3, step: 1 },            // Curandero: Sanar
-  heal_cd: { value: 1, min: 1, max: 6, step: 1 },
-  heal_amount: { value: 5, min: 1, max: 12, step: 1 },
-  heal_range: { value: 3, min: 1, max: 8, step: 1 },
-  ward_cost: { value: 1, min: 1, max: 3, step: 1 },            // Curandero: Escudo de luz
-  ward_cd: { value: 3, min: 1, max: 6, step: 1 },
-  ward_shield: { value: 4, min: 1, max: 12, step: 1 },
-  ward_range: { value: 3, min: 1, max: 8, step: 1 },
-  aimed_cost: { value: 1, min: 1, max: 3, step: 1 },           // Arquero: Disparo certero
+  // ---- Abilities: one per hero. Active ones cost AP and cool down for some of their own turns ----
+  forge_on: { value: 15, min: 2, max: 21, step: 1 },           // Flink, Forja: d20 at turn start, this or more (21 = never)
+  forge_shield: { value: 2, min: 1, max: 8, step: 1 },
+  forge_range: { value: 3, min: 0, max: 8, step: 1 },          // to the most hurt hero this near, himself included
+  tree_cost: { value: 2, min: 1, max: 3, step: 1 },            // Natwure, Árbol guardián
+  tree_cd: { value: 3, min: 1, max: 6, step: 1 },
+  tree_hp: { value: 2, min: 1, max: 10, step: 1 },
+  tree_atk: { value: 2, min: 1, max: 8, step: 1 },
+  tree_def: { value: 2, min: 0, max: 4, step: 1 },
+  tree_hit: { value: 75, min: 30, max: 100, step: 5 },         // its swing at the end of the heroes' turn
+  hands_cost: { value: 1, min: 1, max: 3, step: 1 },           // Orla, Imposición de manos
+  hands_cd: { value: 1, min: 1, max: 6, step: 1 },
+  hands_heal: { value: 4, min: 1, max: 12, step: 1 },
+  hands_range: { value: 3, min: 1, max: 8, step: 1 },
+  hands_revive_hp: { value: 1, min: 1, max: 10, step: 1 },     // a hero she raises comes back with this
+  aimed_cost: { value: 1, min: 1, max: 3, step: 1 },           // Kesh, Tiro certero: ignores cover
   aimed_cd: { value: 2, min: 1, max: 6, step: 1 },
-  aimed_bonus_hit: { value: 10, min: 0, max: 40, step: 5 },
   aimed_bonus_dmg: { value: 2, min: 0, max: 8, step: 1 },
-  volley_cost: { value: 2, min: 1, max: 3, step: 1 },          // Arquero: Lluvia de flechas
-  volley_cd: { value: 3, min: 1, max: 6, step: 1 },
-  volley_dmg: { value: 2, min: 1, max: 8, step: 1 },
-  volley_range: { value: 6, min: 2, max: 10, step: 1 },
+  chains_cost: { value: 2, min: 1, max: 3, step: 1 },          // Morwen, Cadenas arcanas: 3x3, always hits
+  chains_cd: { value: 3, min: 1, max: 6, step: 1 },
+  chains_dmg: { value: 2, min: 1, max: 8, step: 1 },
+  chains_range: { value: 5, min: 2, max: 9, step: 1 },
+  reroll_range: { value: 4, min: 0, max: 10, step: 1 },        // Mirko, Dedos ligeros: a failed d20 this near, once a round
+  lantern_bonus: { value: 2, min: 0, max: 6, step: 0.5 },      // Velia, Farol: tiles of extra light; no cover inside it
+  pip_tonics: { value: 2, min: 1, max: 4, step: 1 },           // Pip, Ganzúa: Tónicos per chest he opens
 
   // ---- Tónico (from chests) ----
   tonic_heal: { value: 6, min: 1, max: 15, step: 1 },          // drunk by its holder

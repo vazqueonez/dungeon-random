@@ -9,3 +9,9 @@
 #   date: 2026-01-31
 #   ships: true               # false for a file only the build uses
 #   placeholder: true         # until it is replaced; leave the line out otherwise
+
+- path: assets/heroes/back.webp
+  origin: you
+  tool: "copied unchanged from references/heroes/dorso.webp, the hero-deck back the person supplied"
+  date: 2026-11-20
+  ships: true
