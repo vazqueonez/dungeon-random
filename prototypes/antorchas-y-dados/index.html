@@ -6,7 +6,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Antorchas y Dados</title>
+<title>Dungeon Random</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   body { font-variant-numeric: tabular-nums; }
@@ -20,7 +20,7 @@
 <script src="art.js"></script>
 <script>
 'use strict';
-// Antorchas y Dados: a co-op tactics board for 1-4 heroes on one screen (hot seat).
+// Dungeon Random: a co-op tactics board for 1-4 heroes on one screen (hot seat).
 // Kept from the one-shot starter: the fixed step, the clock hook, window.game, and the
 // play and figures scenes the checks read.
 
@@ -31,7 +31,7 @@ const STEP = 1 / 60;            // simulation step in seconds; motion is per sec
 const W = 1280, H = 720;        // logical size
 const PIXEL = false;
 const FONT = 'Georgia, "Palatino Linotype", "Book Antiqua", serif';
-const TITLE = 'Antorchas y Dados';
+const TITLE = 'Dungeon Random';
 const CONTROLS = [
   'Clic en una casilla azul: mover (1 PA)',
   'Clic en un enemigo: atacar (1 PA) · en una puerta o cofre al lado: abrir (1 PA)',
@@ -2124,7 +2124,7 @@ const scenes = {
         drawFigure(k, x, y, s, row && k !== 'tree' ? -1 : 1);
         textO(HEROES[k] ? HEROES[k].short : ENEMY_NAMES[k], x, y + 34, 16, HEROES[k] ? HEROES[k].color : '#f4e6c4');
       });
-      textO('Antorchas y Dados · figuras', W / 2, 60, 30, '#f2c46a');
+      textO('Dungeon Random · figuras', W / 2, 60, 30, '#f2c46a');
     },
   },
   title: {

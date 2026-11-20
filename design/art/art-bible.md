@@ -1,4 +1,4 @@
-# Art Bible: Antorchas y Dados
+# Art Bible: Dungeon Random
 
 > **Status**: Draft
 > **Owned By**: art-director

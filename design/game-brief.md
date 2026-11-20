@@ -1,4 +1,4 @@
-# Game Brief: Antorchas y Dados *(guessed)*
+# Game Brief: Dungeon Random
 
 ## In your words
 

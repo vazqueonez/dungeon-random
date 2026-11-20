@@ -1,4 +1,4 @@
-# Héroes — Antorchas y Dados
+# Héroes — Dungeon Random
 
 > **Estado:** Aprobado 2026-11-20 (modo solo)
 > **Sustituye a:** las 4 clases del brief (Guerrero, Mago, Curandero, Arquero)
