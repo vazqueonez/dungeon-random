@@ -43,6 +43,10 @@ const CONTROLS = [
 const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
 const CHEAP = params.get('render') === 'cheap';
 let seed;
+// The hero deck has a seed of its own, so the dungeon (seed) stays the same while the heroes
+// change: it starts from the clock, moves on at every new draw, and is kept on a retry.
+// ?heroseed=N fixes it, and ?seed=N alone fixes it too, so a check plays the same every run.
+let heroSeed = Number(params.get('heroseed')) || (params.get('seed') ? Number(params.get('seed')) ^ 0x5eed : (Date.now() % 2147483647) | 0);
 function rng() { // mulberry32; every gameplay random call reads this, never Math.random
   seed = (seed + 0x6D2B79F5) | 0;
   let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
@@ -275,7 +279,7 @@ function reset() {
   };
   buildDungeon(players);
   // The hero deck, shuffled from the seed: player i plays the i-th card drawn
-  const drawn = seededShuffle(HERO_IDS, seed ^ 0x5eed);
+  const drawn = seededShuffle(HERO_IDS, heroSeed);
   for (let i = 0; i < n; i++) { // each hero on the free floor nearest the table's corner, in their card
     const r = players[i], cls = drawn[i], hp = tune[cls + '_hp'];
     const [x, y] = cornerCell(r);
@@ -2287,8 +2291,9 @@ function drawCornerPicker(x, y) { // the table from above: which corner each pla
 }
 /** Deal and go: through the hero draw from the setup screen, straight into play on a retry. */
 function startGame(draw = false) {
+  if (draw) heroSeed = (Math.imul(heroSeed ^ (heroSeed >>> 16), 0x45d9f3b) + 0x9E3779B9) | 0; // a new shuffle for a new draw
   reset(); scene = draw ? 'draw' : 'play'; drawing.n = 0; drawing.t = 9;
-  events.push({ type: 'start', players: setup.count, heroes: state.heroes.map(h => h.cls), corners: setup.corners.slice(0, setup.count) });
+  events.push({ type: 'start', players: setup.count, heroes: state.heroes.map(h => h.cls), heroSeed, corners: setup.corners.slice(0, setup.count) });
 }
 // ---- The hero draw: each player in turn takes the top card of the deck and turns it over ----
 const drawing = { n: 0, t: 9 }; // cards turned so far; seconds since the last one was drawn

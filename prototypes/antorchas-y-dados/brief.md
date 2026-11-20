@@ -18,6 +18,8 @@ After play: "No me convence vamos a volver a la vista cenital, nada de isométri
 
 After play: "robar héroe sustituye a elegir clase; serán 10 héroes" · "El ataque sale en función de los dados y posteriormente las armas ayudaran a la probabilidad de atacar con dados" · elegido: 10 héroes nuevos (Ataque, Defensa que resta 1 de daño, Vida), una habilidad cada uno adaptada a lo que hay, sin devolver el robado; la lista en `design/heroes.md`
 
+After play: "haz que cuando se robe cartas de heroes salgan aleatorios y no en el mismo orden siempre" · elegido: el mazo de héroes se baraja distinto en cada robo (la mazmorra sigue igual por semilla); al reintentar el nivel se conservan los héroes
+
 **Pitch:** 1-4 héroes entran por las esquinas de una mazmorra a oscuras, abren puertas sala a sala con dados y cartas, y convergen en el centro para derribar a un jefe que no sale de su sala.
 
 **Genre:** tactical RPG + co-op (hot-seat)
