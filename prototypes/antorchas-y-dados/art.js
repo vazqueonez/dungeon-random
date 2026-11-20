@@ -25,6 +25,10 @@
 //                     natwure, sombra, gorm, orla, kesh, morwen, mirko, velia, pip), tree,
 //                     skeleton, goblin, rat, boss.
 //   heroes.back       the back of the hero deck, 660x1024 (any size of that shape).
+//   heroes.frame      the front of a hero card without its hero, 658x1024: the game writes the
+//                     name on the top plate, the figure in the window and the text in the box.
+//   heroes.<hero id>  the hero's figure for its card, standing, transparent background (real
+//                     alpha), ~1100x1400; the game fits it in the window, feet on its floor.
 window.ART = {
   rooms: {
     // osario: 'assets/rooms/osario.png',
@@ -49,5 +53,7 @@ window.ART = {
   },
   heroes: {
     back: 'assets/heroes/back.webp',
+    frame: 'assets/heroes/frame.webp',
+    flink: 'assets/heroes/flink.webp',
   },
 };

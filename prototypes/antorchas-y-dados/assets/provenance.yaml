@@ -15,3 +15,15 @@
   tool: "copied unchanged from references/heroes/dorso.webp, the hero-deck back the person supplied"
   date: 2026-11-20
   ships: true
+
+- path: assets/heroes/frame.webp
+  origin: you
+  tool: "copied unchanged from assets/heroes/frame.webp, the hero-card front the person supplied"
+  date: 2026-11-20
+  ships: true
+
+- path: assets/heroes/flink.webp
+  origin: you
+  tool: "the person's Flink figure with its baked-in checkerboard removed by a flood fill from the edges (scratchpad cutout.cjs, Playwright Chromium canvas), cropped and re-encoded to WebP with alpha"
+  date: 2026-11-20
+  ships: true

@@ -216,7 +216,9 @@ checkTemplates();
 // The hero deck (design/heroes.md): each player draws one. Stats live in config.js as <id>_<stat>;
 // color is the hero's reserved colour (art bible §4); no is the equipment line, not used yet.
 const HEROES = {
-  flink: { name: 'Flink el herrero', short: 'Flink', role: 'Apoyo resistente', color: '#ff7a1f', ability: 'forge' },
+  flink: { name: 'Flink el herrero', short: 'Flink', role: 'Apoyo resistente', color: '#ff7a1f', ability: 'forge',
+    // The card's text is the designer's; the game plays the d20 + shield Forja until equipment exists.
+    desc: 'Lanza un dado en cada turno. Si sale 5 ó 6 reparas una pieza de equipo a ti o a otro héroe.' },
   natwure: { name: 'Natwure', short: 'Natwure', role: 'Invocador', color: '#5fd13a', ability: 'tree', no: 'No puede usar Espadas' },
   sombra: { name: 'Sombra', short: 'Sombra', role: 'Exploradora', color: '#7fd4ff', ability: 'ghost' },
   gorm: { name: 'Gorm el muro', short: 'Gorm', role: 'Tanque', color: '#c8763a', ability: 'guard', no: 'No puede usar Arcos' },
@@ -1890,43 +1892,64 @@ function heroBack() {
   g.beginPath(); g.arc(HCW / 2, HCH / 2, 92, 0, Math.PI * 2); g.stroke();
   return (painted.heroBack = c);
 }
-/** A hero's card face at (x, y), s times its 330x512 size: name, figure, stats, ability, restriction. */
+// The zones of the painted frame (art.js heroes.frame, 658x1024), in card units (half of it).
+const HC_TITLE = { x: 62, y: 47, w: 206 };              // the dark plate at the top
+const HC_FIG = { x: 58, y: 86, w: 214, h: 236 };        // the parchment window
+const HC_DESC = { x: 54, y: 360, w: 222, h: 102 };      // the parchment box at the bottom
+/** Split s into lines no wider than w in the current ctx.font. */
+function wrapLines(s, w) {
+  const out = []; let line = '';
+  for (const word of s.split(/\s+/)) {
+    const t = line ? line + ' ' + word : word;
+    if (line && ctx.measureText(t).width > w) { out.push(line); line = word; } else line = t;
+  }
+  if (line) out.push(line);
+  return out;
+}
+/** The frame stand-in, painted once with the same three zones, until frame.webp loads. */
+function heroFrame() {
+  const img = artImage('heroes', 'frame'); if (img) return img;
+  if (painted.heroFrame) return painted.heroFrame;
+  const c = canvasOf(HCW, HCH), g = c.getContext('2d');
+  rrp(g, 0, 0, HCW, HCH, 18); g.fillStyle = '#4a2a1a'; g.fill();
+  rrp(g, 10, 10, HCW - 20, HCH - 20, 12); g.fillStyle = '#2e2c2a'; g.fill();
+  rrp(g, HC_TITLE.x - 6, 26, HC_TITLE.w + 12, 42, 6); g.fillStyle = '#2f3540'; g.fill();
+  rrp(g, HC_FIG.x - 6, HC_FIG.y - 6, HC_FIG.w + 12, HC_FIG.h + 12, 10); g.fillStyle = '#e6d2ae'; g.fill();
+  rrp(g, HC_DESC.x - 14, HC_DESC.y - 12, HC_DESC.w + 28, HC_DESC.h + 24, 8); g.fillStyle = '#e6d2ae'; g.fill();
+  return (painted.heroFrame = c);
+}
+/** A hero's card face at (x, y), s times its 330x512 size: the painted frame, the name in
+ *  capitals on the top plate, the figure in the window and the ability text in the box below.
+ *  No stats and no restriction: the hover and the HUD carry those. */
 function drawHeroCard(id, x, y, s = 1) {
   const H0 = HEROES[id], ab = ABILITIES[H0.ability];
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
-  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 6;
-  rrect(0, 0, HCW, HCH, 18); ctx.fillStyle = '#4a2a1a'; ctx.fill();
-  ctx.shadowColor = 'transparent';
-  ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.stroke();
-  rrect(10, 10, HCW - 20, HCH - 20, 12); ctx.fillStyle = '#2e2c2a'; ctx.fill();
-  rrect(18, 18, HCW - 36, HCH - 36, 8); ctx.fillStyle = '#e6d2ae'; ctx.fill();
-  rrect(36, 28, HCW - 72, 40, 6); ctx.fillStyle = '#2b1d14'; ctx.fill();
-  ctx.strokeStyle = H0.color; ctx.lineWidth = 2.5; ctx.stroke();
-  text(H0.name, HCW / 2, 49, 22, '#f4e6c4', 'center', true);
-  text(H0.role, HCW / 2, 84, 16, '#5a4030', 'center');
-  rrect(36, 98, HCW - 72, 186, 8); ctx.fillStyle = '#1a1620'; ctx.fill(); ctx.strokeStyle = H0.color; ctx.lineWidth = 2; ctx.stroke();
-  ctx.save(); rrect(36, 98, HCW - 72, 186, 8); ctx.clip();
-  glow(HCW / 2, 200, 120, 'rgba(255,190,110,0.28)');
-  El(HCW / 2, 268, 46, 12, 'rgba(0,0,0,0.5)', 0);
-  drawFigure(id, HCW / 2, 266, 2.6);
+  // frame.webp is opaque with a dark margin round the border: shadow and clip to the border's edge
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 6;
+  rrect(8, 6, HCW - 16, HCH - 14, 10); ctx.fillStyle = '#1a1210'; ctx.fill(); ctx.restore();
+  ctx.save(); rrect(8, 6, HCW - 16, HCH - 14, 10); ctx.clip();
+  ctx.drawImage(heroFrame(), 0, 0, HCW, HCH); ctx.restore();
+  // title: one line, capitals, shrinking from 22 to 16 px to fit the plate (spec ASSET-013)
+  const name = H0.name.toUpperCase(); let ts = 22;
+  for (; ts > 16; ts--) { ctx.font = `bold ${ts}px ${FONT}`; if (ctx.measureText(name).width <= HC_TITLE.w) break; }
+  const squeeze = Math.min(1, HC_TITLE.w / ctx.measureText(name).width); // still too wide at 16 px: narrow it
+  ctx.save(); ctx.translate(HCW / 2, HC_TITLE.y); ctx.scale(squeeze, 1);
+  textO(name, 0, 0, ts, '#f4e6c4'); ctx.restore();
+  // figure: the painted one contained and standing on the window's floor; else the code figure
+  ctx.save(); rrect(HC_FIG.x, HC_FIG.y, HC_FIG.w, HC_FIG.h, 8); ctx.clip();
+  const floor = HC_FIG.y + HC_FIG.h - 6, fig = artImage('heroes', id);
+  El(HCW / 2, floor - 2, 62, 12, 'rgba(60,40,20,0.35)', 0);
+  if (fig) {
+    const k = Math.min(HC_FIG.w / fig.width, (HC_FIG.h - 6) / fig.height), fw = fig.width * k, fh = fig.height * k;
+    ctx.drawImage(fig, HCW / 2 - fw / 2, floor - fh, fw, fh);
+  } else drawFigure(id, HCW / 2, floor - 4, 3.0);
   ctx.restore();
-  const st = [['Vida', hstatId(id, 'hp')], ['Ataque', hstatId(id, 'atk')], ['Defensa', hstatId(id, 'def')],
-    ['Mover', hstatId(id, 'move')], ['Alcance', hstatId(id, 'range')], ['Acierto', hstatId(id, 'hit') + '%']];
-  st.forEach(([k, v], i) => {
-    const bx = 24 + (i % 3) * 96, by = 294 + Math.floor(i / 3) * 40;
-    rrect(bx, by, 90, 34, 5); ctx.fillStyle = 'rgba(43,29,20,0.1)'; ctx.fill(); ctx.strokeStyle = 'rgba(43,29,20,0.45)'; ctx.lineWidth = 1.2; ctx.stroke();
-    text(k, bx + 6, by + 17, 13, '#5a4030', 'left');
-    text(String(v), bx + 85, by + 17, 17, '#2b1d14', 'right', true);
-  });
-  const cost = ab.passive ? 'pasiva' : `${tune[H0.ability + '_cost']} PA · recarga ${tune[H0.ability + '_cd']}`;
-  text(ab.name, 28, 390, 18, '#2b1d14', 'left', true);
-  text(cost, HCW - 28, 390, 14, '#5a4030', 'right');
-  ab.text().forEach((l, k) => text(l, 28, 414 + k * 19, 15, '#3a2a1c', 'left'));
-  if (H0.no) {
-    C(36, 478, 8, '#e6d2ae', 0); ctx.strokeStyle = '#7a1c1c'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(36, 478, 7, 0, Math.PI * 2); ctx.moveTo(31, 473); ctx.lineTo(41, 483); ctx.stroke();
-    text(H0.no, 50, 478, 15, '#7a1c1c', 'left', true);
-  }
+  // description: the card's own text, else the ability's; wrapped and centred in the box
+  const desc = H0.desc || ab.text().join(' ');
+  let ds = 17, lines;
+  for (; ; ds--) { ctx.font = `${ds}px ${FONT}`; lines = wrapLines(desc, HC_DESC.w); if (lines.length * ds * 1.25 <= HC_DESC.h || ds <= 16) break; }
+  const lh = ds * 1.25, y0 = HC_DESC.y + HC_DESC.h / 2 - (lines.length - 1) * lh / 2;
+  lines.forEach((l, k) => text(l, HCW / 2, y0 + k * lh, ds, '#2b1d14', 'center'));
   ctx.restore();
 }
 /** A stat of a hero card by its id (config.js <id>_<stat>). */
